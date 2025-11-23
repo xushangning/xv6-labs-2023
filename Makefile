@@ -9,7 +9,7 @@ K=kernel
 U=user
 
 OBJS = \
-  $K/entry.o \
+  $K/src/main.rs \
   $K/kalloc.o \
   $K/string.o \
   $K/main.o \
@@ -119,8 +119,9 @@ endif
 
 LDFLAGS = -z max-page-size=4096
 
-$K/kernel: $(OBJS) $(OBJS_KCSAN) $K/kernel.ld $U/initcode
-	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) $(OBJS_KCSAN)
+$K/kernel: $(OBJS) $(OBJS_KCSAN) $K/kernel.ld $U/initcode $K/build.rs
+	cd $K && cargo build
+	cp $K/target/riscv64gc-unknown-none-elf/debug/kernel $@
 	$(OBJDUMP) -S $K/kernel > $K/kernel.asm
 	$(OBJDUMP) -t $K/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $K/kernel.sym
 
@@ -271,6 +272,7 @@ fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
 -include kernel/*.d user/*.d
 
 clean: 
+	cd $K && cargo clean
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
 	*/*.o */*.d */*.asm */*.sym \
 	$U/initcode $U/initcode.out $K/kernel fs.img \
