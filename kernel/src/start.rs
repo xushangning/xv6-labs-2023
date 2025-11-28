@@ -1,3 +1,5 @@
+use core::mem::MaybeUninit;
+
 use riscv::register::{mhartid, mstatus};
 
 use crate::param::NCPU;
@@ -8,7 +10,20 @@ struct Stack([u8; 4096 * NCPU]);
 #[unsafe(export_name = "stack0")]
 static mut STACK0: Stack = Stack([0; _]);
 
-static mut TIMER_SCRATCH: [[usize; 5]; NCPU] = [[0; _]; _];
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Scratch {
+    /// space for timervec to save registers.
+    ctx: [usize; 3],
+
+    /// address of CLINT MTIMECMP register.
+    clint_mtimecmp: *mut usize,
+
+    /// desired interval (in cycles) between timer interrupts.
+    timer_interrupt_interval: usize,
+}
+
+static mut TIMER_SCRATCH: [MaybeUninit<Scratch>; NCPU] = [MaybeUninit::uninit(); _];
 
 /// entry.S jumps here in machine mode on stack0.
 #[unsafe(no_mangle)]
@@ -85,13 +100,13 @@ fn timerinit() {
         mtimecmp.write_volatile(clint::MTIME.read_volatile() + INTERVAL);
 
         // prepare information in scratch[] for timervec.
-        // scratch[0..2] : space for timervec to save registers.
-        // scratch[3] : address of CLINT MTIMECMP register.
-        // scratch[4] : desired interval (in cycles) between timer interrupts.
-        let scratch = &mut TIMER_SCRATCH[id];
-        scratch[3] = mtimecmp.addr();
-        scratch[4] = INTERVAL;
-        mscratch::write(scratch.as_mut_ptr().addr());
+        let scratch = TIMER_SCRATCH[id].as_mut_ptr();
+        scratch.write(Scratch {
+            ctx: [0; _],
+            clint_mtimecmp: mtimecmp,
+            timer_interrupt_interval: INTERVAL,
+        });
+        mscratch::write(scratch.addr());
 
         // set the machine-mode trap handler.
         unsafe extern "C" {
