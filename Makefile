@@ -12,7 +12,10 @@ OBJS = \
   $K/src/main.rs \
   $K/kalloc.o \
   $K/string.o \
-  $K/main.o \
+  $K/src/lib.rs \
+  $K/src/memlayout.rs \
+  $K/src/param.rs \
+  $K/src/riscv.rs \
   $K/vm.o \
   $K/proc.o \
   $K/swtch.o \
@@ -33,7 +36,7 @@ OBJS = \
   $K/virtio_disk.o
 
 OBJS_KCSAN = \
-  $K/start.o \
+  $K/src/start.rs \
   $K/console.o \
   $K/printf.o \
   $K/uart.o \

@@ -24,7 +24,6 @@ fn main() {
             "plic.c",
             "virtio_disk.c",
             // OBJS_KCSAN
-            "start.c",
             "console.c",
             "printf.c",
             "uart.c",

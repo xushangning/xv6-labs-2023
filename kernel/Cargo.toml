@@ -8,7 +8,12 @@ name = "kernel"
 test = false
 bench = false
 
+[lib]
+test = false
+bench = false
+
 [dependencies]
+riscv = "0.15.0"
 
 [build-dependencies]
 cc = "1.2.45"
