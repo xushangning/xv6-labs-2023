@@ -44,10 +44,7 @@ unsafe extern "C" fn start() -> ! {
 
         // set M Exception Program Counter to main, for mret.
         // requires gcc -mcmodel=medany
-        unsafe extern "C" {
-            fn main();
-        }
-        mepc::write(main as usize);
+        mepc::write(crate::main as usize);
 
         // disable paging for now.
         satp::write(Satp::from_bits(0));
