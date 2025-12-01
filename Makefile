@@ -37,7 +37,7 @@ OBJS = \
 
 OBJS_KCSAN = \
   $K/src/start.rs \
-  $K/console.o \
+  $K/src/console.rs \
   $K/printf.o \
   $K/uart.o \
   $K/spinlock.o

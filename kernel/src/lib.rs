@@ -6,6 +6,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+mod console;
 pub(crate) mod memlayout;
 pub(crate) mod param;
 mod proc;
@@ -21,7 +22,7 @@ extern "C" fn main() {
 
     unsafe {
         if proc::cpuid() == 0 {
-            sys::consoleinit();
+            console::init();
             sys::printfinit();
             printf(c"\n".as_ptr().cast_mut());
             printf(c"xv6 kernel is booting\n".as_ptr().cast_mut());

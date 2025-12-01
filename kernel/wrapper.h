@@ -1,3 +1,7 @@
 #include "types.h"
 #include "riscv.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 #include "defs.h"
