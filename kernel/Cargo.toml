@@ -16,4 +16,5 @@ bench = false
 riscv = "0.15.0"
 
 [build-dependencies]
+bindgen = "0.72.1"
 cc = "1.2.45"
