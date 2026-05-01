@@ -44,7 +44,7 @@ unsafe extern "C" fn start() -> ! {
 
         // set M Exception Program Counter to main, for mret.
         // requires gcc -mcmodel=medany
-        mepc::write(crate::main as usize);
+        mepc::write(crate::main as *const () as usize);
 
         // disable paging for now.
         satp::write(Satp::from_bits(0));
@@ -109,7 +109,7 @@ fn timerinit() {
         unsafe extern "C" {
             fn timervec();
         }
-        mtvec::write(Mtvec::from_bits(timervec as usize));
+        mtvec::write(Mtvec::from_bits(timervec as *const () as usize));
 
         // enable machine-mode interrupts.
         mstatus::set_mie();
