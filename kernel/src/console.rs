@@ -7,7 +7,10 @@
 //!   control-d -- end of file
 //!   control-p -- print process list
 
-use core::ffi::{c_char, c_int, c_uint};
+use core::{
+    ffi::{c_char, c_int, c_uint},
+    mem::MaybeUninit,
+};
 
 #[repr(C)]
 struct Cons {
@@ -26,7 +29,26 @@ struct Cons {
 unsafe extern "C" {
     static mut cons: Cons;
     fn consoleread(user_dst: c_int, dst: u64, n: c_int) -> c_int;
-    fn consolewrite(user_src: c_int, src: u64, n: c_int) -> c_int;
+}
+
+unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
+    for i in 0..n {
+        let mut c: MaybeUninit<c_char> = MaybeUninit::uninit();
+        if unsafe {
+            crate::sys::either_copyin(
+                c.as_mut_ptr().cast(),
+                user_src,
+                src + u64::try_from(i).unwrap(),
+                1,
+            )
+        } == -1
+        {
+            return i;
+        }
+        unsafe { crate::sys::uartputc(c.assume_init().into()) };
+    }
+
+    n
 }
 
 pub(crate) fn init() {
@@ -44,7 +66,7 @@ pub(crate) fn init() {
             .add(crate::sys::CONSOLE as usize)
             .write(devsw {
                 read: Some(consoleread),
-                write: Some(consolewrite),
+                write: Some(write),
             });
     }
 }
