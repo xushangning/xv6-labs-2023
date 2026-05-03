@@ -19,7 +19,7 @@ unsafe extern "C" {
     /// in kernelvec.S, calls kerneltrap().
     fn kernelvec();
 
-    fn devintr() -> c_int;
+    fn clockintr();
 }
 
 /// handle an interrupt, exception, or system call from user space.
@@ -139,4 +139,44 @@ unsafe extern "C" fn usertrapret() -> ! {
     unsafe {
         core::mem::transmute::<_, unsafe extern "C" fn(usize) -> !>(trampoline_userret)(satp.bits())
     };
+}
+
+/// Check if it's an external interrupt or software interrupt, and handle it.
+/// Returns 2 if timer interrupt, 1 if other device, 0 if not recognized.
+fn devintr() -> c_int {
+    use crate::memlayout::{UART0_IRQ, VIRTIO0_IRQ};
+    use crate::sys::{plic_claim, plic_complete, uartintr, virtio_disk_intr};
+
+    let scause = scause::read();
+
+    if scause.is_interrupt() && scause.code() == 9 {
+        // supervisor external interrupt via PLIC
+        let irq = unsafe { plic_claim() };
+
+        if irq == UART0_IRQ {
+            unsafe { uartintr() };
+        } else if irq == VIRTIO0_IRQ {
+            unsafe { virtio_disk_intr() };
+        } else if irq != 0 {
+            unsafe { printf(c"unexpected interrupt irq=%d\n".as_ptr().cast_mut(), irq) };
+        }
+
+        if irq != 0 {
+            unsafe { plic_complete(irq) };
+        }
+
+        1
+    } else if scause.is_interrupt() && scause.code() == 1 {
+        // software interrupt from machine-mode timer, forwarded by timervec in kernelvec.S
+        if unsafe { crate::sys::cpuid() } == 0 {
+            unsafe { clockintr() };
+        }
+
+        // acknowledge by clearing SSIP bit in sip
+        unsafe { crate::riscv::sip::clear_ssip() };
+
+        2
+    } else {
+        0
+    }
 }

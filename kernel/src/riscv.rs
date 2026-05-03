@@ -7,6 +7,16 @@ pub(crate) fn make_satp(pagetable: usize) -> Satp {
     ret
 }
 
+pub(crate) mod sip {
+    /// Clear the supervisor software interrupt pending bit (SSIP).
+    #[inline]
+    pub(crate) unsafe fn clear_ssip() {
+        unsafe {
+            core::arch::asm!("csrc sip, {}", in(reg) 2usize, options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
 pub(crate) mod intr {
     /// enable device interrupts
     #[inline]

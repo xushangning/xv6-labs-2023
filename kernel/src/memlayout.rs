@@ -45,3 +45,6 @@ pub(crate) const TRAMPOLINE: usize = MAXVA - PGSIZE;
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 pub(crate) const TRAPFRAME: usize = TRAMPOLINE - PGSIZE;
+
+pub(crate) const UART0_IRQ: i32 = 10;
+pub(crate) const VIRTIO0_IRQ: i32 = 1;
