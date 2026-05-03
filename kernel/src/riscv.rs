@@ -1,3 +1,20 @@
+use riscv::register::satp::{self, Satp};
+
+pub(crate) fn make_satp(pagetable: usize) -> Satp {
+    let mut ret = Satp::from_bits(0);
+    ret.set_ppn(pagetable >> PGSHIFT);
+    ret.set_mode(satp::Mode::Sv39);
+    ret
+}
+
+pub(crate) mod intr {
+    /// disable device interrupts
+    #[inline]
+    pub(crate) unsafe fn off() {
+        unsafe { riscv::register::sstatus::clear_sie() }
+    }
+}
+
 pub(crate) mod tp {
     #[inline]
     pub(crate) unsafe fn read() -> usize {

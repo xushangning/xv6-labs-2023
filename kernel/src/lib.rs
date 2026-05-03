@@ -14,6 +14,7 @@ pub(crate) mod riscv;
 mod start;
 pub(crate) mod sys;
 mod trampoline;
+mod trap;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 
