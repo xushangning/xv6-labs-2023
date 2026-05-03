@@ -15,6 +15,7 @@ mod start;
 pub(crate) mod sys;
 mod trampoline;
 mod trap;
+mod uart;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 

@@ -149,7 +149,7 @@ unsafe extern "C" fn usertrapret() -> ! {
 fn devintr() -> c_int {
     use crate::{
         memlayout::{uart0, virtio0},
-        sys::{plic_claim, plic_complete, uartintr, virtio_disk_intr},
+        sys::{plic_claim, plic_complete, virtio_disk_intr},
     };
 
     let scause = scause::read();
@@ -162,7 +162,7 @@ fn devintr() -> c_int {
             let irq = plic_claim();
 
             match irq {
-                uart0::IRQ => uartintr(),
+                uart0::IRQ => crate::uart::intr(),
                 virtio0::IRQ => virtio_disk_intr(),
                 _ => {
                     if irq != 0 {
