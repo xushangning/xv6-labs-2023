@@ -14,9 +14,7 @@ pub(crate) fn intr() {
         if c == -1 {
             break;
         }
-        unsafe {
-            crate::sys::consoleintr(c);
-        }
+        crate::console::intr(c.try_into().unwrap());
     }
 
     // send buffered characters.

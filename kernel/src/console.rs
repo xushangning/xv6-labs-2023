@@ -12,7 +12,9 @@ use core::{
     mem::MaybeUninit,
 };
 
-use crate::sys::release;
+use crate::sys::{acquire, release};
+
+const BACKSPACE: c_int = 0x100;
 
 /// Control-x
 const fn ctrl(x: u8) -> u8 {
@@ -64,7 +66,7 @@ unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
 unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int {
     let target = n;
     unsafe {
-        crate::sys::acquire(&raw mut cons.lock);
+        acquire(&raw mut cons.lock);
     }
     while n > 0 {
         unsafe {
@@ -113,6 +115,63 @@ unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int 
     }
 
     target - n
+}
+
+/// the console input interrupt handler.
+/// uartintr() calls this for input character.
+/// do erase/kill processing, append to cons.buf,
+/// wake up consoleread() if a whole line has arrived.
+pub(super) fn intr(mut c: u8) {
+    use crate::sys::consputc;
+
+    unsafe {
+        acquire(&raw mut cons.lock);
+
+        if c == ctrl(b'P') {
+            // Print process list.
+            crate::sys::procdump();
+        } else if c == ctrl(b'U') {
+            // Kill line.
+            while cons.e != cons.w
+                && cons.buf[(cons.e - 1) as usize % (*&raw const cons).buf.len()] != b'\n'
+            {
+                cons.e -= 1;
+                consputc(BACKSPACE);
+            }
+        } else if c == ctrl(b'H') /* Backspace */ || c == b'\x7f'
+        /* Delete key */
+        {
+            if cons.e != cons.w {
+                cons.e -= 1;
+                consputc(BACKSPACE);
+            }
+        } else if c != 0
+            && cons.e.wrapping_sub(cons.r) < (*&raw const cons).buf.len().try_into().unwrap()
+        {
+            if c == b'\r' {
+                c = b'\n';
+            }
+
+            // echo back to the user.
+            consputc(c.into());
+
+            // store for consumption by consoleread().
+            cons.buf[cons.e as usize % (*&raw const cons).buf.len()] = c;
+            cons.e += 1;
+
+            if c == b'\n'
+                || c == ctrl(b'D')
+                || cons.e.wrapping_sub(cons.r) == (*&raw const cons).buf.len().try_into().unwrap()
+            {
+                // wake up consoleread() if a whole line (or end-of-file)
+                // has arrived.
+                cons.w = cons.e;
+                crate::sys::wakeup((&raw mut cons.r).cast());
+            }
+        }
+
+        release(&raw mut cons.lock);
+    }
 }
 
 pub(crate) fn init() {
