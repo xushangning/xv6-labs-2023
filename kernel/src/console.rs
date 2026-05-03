@@ -12,6 +12,13 @@ use core::{
     mem::MaybeUninit,
 };
 
+use crate::sys::release;
+
+/// Control-x
+const fn ctrl(x: u8) -> u8 {
+    x - b'@'
+}
+
 #[repr(C)]
 struct Cons {
     lock: crate::sys::spinlock,
@@ -28,7 +35,6 @@ struct Cons {
 
 unsafe extern "C" {
     static mut cons: Cons;
-    fn consoleread(user_dst: c_int, dst: u64, n: c_int) -> c_int;
 }
 
 unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
@@ -51,6 +57,64 @@ unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
     n
 }
 
+/// user read()s from the console go here.
+/// copy (up to) a whole input line to dst.
+/// user_dist indicates whether dst is a user
+/// or kernel address.
+unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int {
+    let target = n;
+    unsafe {
+        crate::sys::acquire(&raw mut cons.lock);
+    }
+    while n > 0 {
+        unsafe {
+            // wait until interrupt handler has put some
+            // input into cons.buffer.
+            while cons.r == cons.w {
+                if crate::sys::killed(crate::sys::myproc()) != 0 {
+                    release(&raw mut cons.lock);
+                    return -1;
+                }
+                crate::sys::sleep((&raw mut cons.r).cast(), &raw mut cons.lock);
+            }
+
+            let c = cons.buf[cons.r as usize % (*&raw const cons).buf.len()];
+            cons.r += 1;
+
+            // end-of-file
+            if c == ctrl(b'D') {
+                if n < target {
+                    // Save ^D for next time, to make sure
+                    // caller gets a 0-byte result.
+                    cons.r -= 1;
+                }
+                break;
+            }
+
+            // copy the input byte to the user-space buffer.
+            let mut cbuf = c;
+            if crate::sys::either_copyout(user_dst, dst, (&raw mut cbuf).cast(), 1) == -1 {
+                break;
+            }
+
+            dst += 1;
+            n -= 1;
+
+            if c == b'\n' {
+                // a whole line has arrived, return to
+                // the user-level read().
+                break;
+            }
+        }
+    }
+
+    unsafe {
+        release(&raw mut cons.lock);
+    }
+
+    target - n
+}
+
 pub(crate) fn init() {
     use crate::sys::devsw;
 
@@ -65,7 +129,7 @@ pub(crate) fn init() {
             .as_mut_ptr()
             .add(crate::sys::CONSOLE as usize)
             .write(devsw {
-                read: Some(consoleread),
+                read: Some(read),
                 write: Some(write),
             });
     }
