@@ -7,12 +7,12 @@ use core::{
 };
 
 mod console;
-pub(crate) mod memlayout;
-pub(crate) mod param;
+mod memlayout;
+mod param;
 mod proc;
-pub(crate) mod riscv;
+mod riscv;
 mod start;
-pub(crate) mod sys;
+mod sys;
 mod trampoline;
 mod trap;
 mod uart;
