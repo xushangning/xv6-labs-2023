@@ -8,6 +8,12 @@ pub(crate) fn make_satp(pagetable: usize) -> Satp {
 }
 
 pub(crate) mod intr {
+    /// enable device interrupts
+    #[inline]
+    pub(crate) unsafe fn on() {
+        unsafe { riscv::register::sstatus::set_sie() }
+    }
+
     /// disable device interrupts
     #[inline]
     pub(crate) unsafe fn off() {

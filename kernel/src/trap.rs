@@ -1,14 +1,100 @@
+use core::ffi::c_int;
+
 use riscv::register::{
-    satp, sepc,
+    satp, scause, sepc,
     sstatus::{self, SPP},
-    stvec,
+    stval, stvec,
+};
+
+use crate::{
+    riscv::intr,
+    sys::{exit, killed, myproc, printf},
 };
 
 unsafe extern "C" {
     fn trampoline();
     fn uservec();
     fn userret();
-    fn usertrap();
+
+    /// in kernelvec.S, calls kerneltrap().
+    fn kernelvec();
+
+    fn devintr() -> c_int;
+}
+
+/// handle an interrupt, exception, or system call from user space.
+/// called from trampoline.S
+#[unsafe(no_mangle)]
+unsafe extern "C" fn usertrap() {
+    let mut which_dev = 0;
+
+    if sstatus::read().spp() != SPP::User {
+        unsafe { crate::sys::panic(c"usertrap: not from user mode".as_ptr().cast_mut()) };
+    }
+
+    // send interrupts and exceptions to kerneltrap(),
+    // since we're now in the kernel.
+    unsafe {
+        stvec::write(stvec::Stvec::new(
+            (kernelvec as *const ()).addr(),
+            stvec::TrapMode::Direct,
+        ));
+    }
+
+    let p = unsafe { myproc().as_mut().unwrap() };
+
+    unsafe {
+        // save user program counter.
+        (*p.trapframe).epc = sepc::read().try_into().unwrap();
+
+        if scause::read().bits() == 8 {
+            // system call
+
+            if killed(p) != 0 {
+                exit(-1);
+            }
+
+            // sepc points to the ecall instruction,
+            // but we want to return to the next instruction.
+            (*p.trapframe).epc += 4;
+
+            // an interrupt will change sepc, scause, and sstatus,
+            // so enable only now that we're done with those registers.
+            intr::on();
+
+            crate::sys::syscall();
+        } else {
+            which_dev = devintr();
+            if which_dev != 0 {
+                // ok
+            } else {
+                printf(
+                    c"usertrap(): unexpected scause %p pid=%d\n"
+                        .as_ptr()
+                        .cast_mut(),
+                    scause::read().bits(),
+                    p.pid,
+                );
+                printf(
+                    c"            sepc=%p stval=%p\n".as_ptr().cast_mut(),
+                    sepc::read(),
+                    stval::read(),
+                );
+                crate::sys::setkilled(p);
+            }
+        }
+
+        if killed(p) != 0 {
+            exit(-1);
+        }
+
+        // give up the CPU if this is a timer interrupt.
+        if which_dev == 2 {
+            crate::sys::yield_();
+        }
+
+        usertrapret();
+    }
 }
 
 /// return to user space
@@ -16,10 +102,10 @@ unsafe extern "C" {
 unsafe extern "C" fn usertrapret() -> ! {
     use crate::memlayout::TRAMPOLINE;
 
-    let p = unsafe { crate::sys::myproc().as_mut().unwrap() };
+    let p = unsafe { myproc().as_mut().unwrap() };
 
     unsafe {
-        crate::riscv::intr::off();
+        intr::off();
     }
 
     let trampoline_uservec =
