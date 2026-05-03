@@ -19,7 +19,7 @@ OBJS = \
   $K/vm.o \
   $K/src/proc.rs \
   $K/swtch.o \
-  $K/trampoline.o \
+  $K/src/trampoline.rs \
   $K/trap.o \
   $K/syscall.o \
   $K/sysproc.o \

@@ -17,6 +17,8 @@
 //! end -- start of kernel page allocation area
 //! PHYSTOP -- end RAM used by the kernel
 
+use crate::riscv::{MAXVA, PGSIZE};
+
 /// core local interruptor (CLINT), which contains the timer.
 pub(crate) mod clint {
     use core::ptr;
@@ -28,3 +30,18 @@ pub(crate) mod clint {
     /// cycles since boot.
     pub(crate) const MTIME: *const usize = ptr::with_exposed_provenance(BASE + 0xBFF8);
 }
+
+// map the trampoline page to the highest address,
+// in both user and kernel space.
+pub(crate) const TRAMPOLINE: usize = MAXVA - PGSIZE;
+
+// User memory layout.
+// Address zero first:
+//   text
+//   original data and bss
+//   fixed-size stack
+//   expandable heap
+//   ...
+//   TRAPFRAME (p->trapframe, used by the trampoline)
+//   TRAMPOLINE (the same page as in the kernel)
+pub(crate) const TRAPFRAME: usize = TRAMPOLINE - PGSIZE;

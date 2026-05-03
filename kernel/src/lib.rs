@@ -13,6 +13,7 @@ mod proc;
 pub(crate) mod riscv;
 mod start;
 pub(crate) mod sys;
+mod trampoline;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 
