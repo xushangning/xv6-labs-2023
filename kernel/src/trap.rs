@@ -141,39 +141,58 @@ unsafe extern "C" fn usertrapret() -> ! {
     };
 }
 
-/// Check if it's an external interrupt or software interrupt, and handle it.
-/// Returns 2 if timer interrupt, 1 if other device, 0 if not recognized.
+/// Check if it's an external interrupt or software interrupt,
+/// and handle it.
+/// returns 2 if timer interrupt,
+/// 1 if other device,
+/// 0 if not recognized.
 fn devintr() -> c_int {
-    use crate::memlayout::{UART0_IRQ, VIRTIO0_IRQ};
-    use crate::sys::{plic_claim, plic_complete, uartintr, virtio_disk_intr};
+    use crate::{
+        memlayout::{uart0, virtio0},
+        sys::{plic_claim, plic_complete, uartintr, virtio_disk_intr},
+    };
 
     let scause = scause::read();
 
-    if scause.is_interrupt() && scause.code() == 9 {
-        // supervisor external interrupt via PLIC
-        let irq = unsafe { plic_claim() };
+    if scause.is_interrupt() && scause.bits() & 0xff == 9 {
+        // this is a supervisor external interrupt, via PLIC.
 
-        if irq == UART0_IRQ {
-            unsafe { uartintr() };
-        } else if irq == VIRTIO0_IRQ {
-            unsafe { virtio_disk_intr() };
-        } else if irq != 0 {
-            unsafe { printf(c"unexpected interrupt irq=%d\n".as_ptr().cast_mut(), irq) };
-        }
+        unsafe {
+            // irq indicates which device interrupted.
+            let irq = plic_claim();
 
-        if irq != 0 {
-            unsafe { plic_complete(irq) };
+            match irq {
+                uart0::IRQ => uartintr(),
+                virtio0::IRQ => virtio_disk_intr(),
+                _ => {
+                    if irq != 0 {
+                        printf(c"unexpected interrupt irq=%d\n".as_ptr().cast_mut(), irq)
+                    }
+                }
+            }
+
+            // the PLIC allows each device to raise at most one
+            // interrupt at a time; tell the PLIC the device is
+            // now allowed to interrupt again.
+            if irq != 0 {
+                plic_complete(irq);
+            }
         }
 
         1
     } else if scause.is_interrupt() && scause.code() == 1 {
-        // software interrupt from machine-mode timer, forwarded by timervec in kernelvec.S
-        if unsafe { crate::sys::cpuid() } == 0 {
-            unsafe { clockintr() };
-        }
+        // software interrupt from a machine-mode timer interrupt,
+        // forwarded by timervec in kernelvec.S.
 
-        // acknowledge by clearing SSIP bit in sip
-        unsafe { crate::riscv::sip::clear_ssip() };
+        unsafe {
+            if crate::proc::cpuid() == 0 {
+                clockintr();
+            }
+
+            // acknowledge the software interrupt by clearing
+            // the SSIP bit in sip.
+            riscv::register::sip::clear_ssoft();
+        }
 
         2
     } else {
