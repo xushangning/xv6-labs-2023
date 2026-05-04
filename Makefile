@@ -31,7 +31,7 @@ OBJS = \
   $K/pipe.o \
   $K/exec.o \
   $K/sysfile.o \
-  $K/kernelvec.o \
+  $K/src/kernelvec.rs \
   $K/plic.o \
   $K/virtio_disk.o
 

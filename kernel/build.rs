@@ -20,7 +20,6 @@ fn main() {
             "pipe.c",
             "exec.c",
             "sysfile.c",
-            "kernelvec.S",
             "plic.c",
             "virtio_disk.c",
             // OBJS_KCSAN

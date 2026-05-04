@@ -7,6 +7,7 @@ use core::{
 };
 
 mod console;
+mod kernelvec;
 mod memlayout;
 mod param;
 mod proc;
