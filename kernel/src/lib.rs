@@ -10,6 +10,7 @@ mod console;
 mod kernelvec;
 mod memlayout;
 mod param;
+mod printf;
 mod proc;
 mod riscv;
 mod start;

@@ -29,7 +29,7 @@ unsafe extern "C" fn usertrap() {
     let mut which_dev = 0;
 
     if sstatus::read().spp() != SPP::User {
-        unsafe { crate::sys::panic(c"usertrap: not from user mode".as_ptr().cast_mut()) };
+        crate::printf::panic(c"usertrap: not from user mode");
     }
 
     // send interrupts and exceptions to kerneltrap(),
