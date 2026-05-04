@@ -8,11 +8,11 @@
 //!   control-p -- print process list
 
 use core::{
-    ffi::{c_char, c_int, c_uint},
+    ffi::{c_char, c_int},
     mem::MaybeUninit,
 };
 
-use crate::sys::{acquire, release};
+use crate::sys::{acquire, release, spinlock};
 
 const BACKSPACE: c_int = 0x100;
 
@@ -21,23 +21,30 @@ const fn ctrl(x: u8) -> u8 {
     x - b'@'
 }
 
-#[repr(C)]
 struct Cons {
-    lock: crate::sys::spinlock,
+    lock: spinlock,
 
     /// input
     buf: [c_char; 128],
     /// Read index
-    r: c_uint,
+    r: usize,
     /// Write index
-    w: c_uint,
+    w: usize,
     /// Edit index
-    e: c_uint,
+    e: usize,
 }
 
-unsafe extern "C" {
-    static mut cons: Cons;
-}
+static mut CONS: Cons = Cons {
+    lock: spinlock {
+        name: c"cons".as_ptr().cast_mut(),
+        locked: 0,
+        cpu: core::ptr::null_mut(),
+    },
+    buf: [0; _],
+    r: 0,
+    w: 0,
+    e: 0,
+};
 
 unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
     for i in 0..n {
@@ -66,29 +73,29 @@ unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
 unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int {
     let target = n;
     unsafe {
-        acquire(&raw mut cons.lock);
+        acquire(&raw mut CONS.lock);
     }
     while n > 0 {
         unsafe {
             // wait until interrupt handler has put some
             // input into cons.buffer.
-            while cons.r == cons.w {
+            while CONS.r == CONS.w {
                 if crate::sys::killed(crate::sys::myproc()) != 0 {
-                    release(&raw mut cons.lock);
+                    release(&raw mut CONS.lock);
                     return -1;
                 }
-                crate::sys::sleep((&raw mut cons.r).cast(), &raw mut cons.lock);
+                crate::sys::sleep((&raw mut CONS.r).cast(), &raw mut CONS.lock);
             }
 
-            let c = cons.buf[cons.r as usize % (*&raw const cons).buf.len()];
-            cons.r += 1;
+            let c = CONS.buf[CONS.r % (*&raw const CONS).buf.len()];
+            CONS.r += 1;
 
             // end-of-file
             if c == ctrl(b'D') {
                 if n < target {
                     // Save ^D for next time, to make sure
                     // caller gets a 0-byte result.
-                    cons.r -= 1;
+                    CONS.r -= 1;
                 }
                 break;
             }
@@ -111,7 +118,7 @@ unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int 
     }
 
     unsafe {
-        release(&raw mut cons.lock);
+        release(&raw mut CONS.lock);
     }
 
     target - n
@@ -125,29 +132,26 @@ pub(super) fn intr(mut c: u8) {
     use crate::sys::consputc;
 
     unsafe {
-        acquire(&raw mut cons.lock);
+        acquire(&raw mut CONS.lock);
 
         if c == ctrl(b'P') {
             // Print process list.
             crate::sys::procdump();
         } else if c == ctrl(b'U') {
             // Kill line.
-            while cons.e != cons.w
-                && cons.buf[(cons.e - 1) as usize % (*&raw const cons).buf.len()] != b'\n'
+            while CONS.e != CONS.w && CONS.buf[(CONS.e - 1) % (*&raw const CONS).buf.len()] != b'\n'
             {
-                cons.e -= 1;
+                CONS.e -= 1;
                 consputc(BACKSPACE);
             }
         } else if c == ctrl(b'H') /* Backspace */ || c == b'\x7f'
         /* Delete key */
         {
-            if cons.e != cons.w {
-                cons.e -= 1;
+            if CONS.e != CONS.w {
+                CONS.e -= 1;
                 consputc(BACKSPACE);
             }
-        } else if c != 0
-            && cons.e.wrapping_sub(cons.r) < (*&raw const cons).buf.len().try_into().unwrap()
-        {
+        } else if c != 0 && CONS.e.wrapping_sub(CONS.r) < (*&raw const CONS).buf.len() {
             if c == b'\r' {
                 c = b'\n';
             }
@@ -156,21 +160,21 @@ pub(super) fn intr(mut c: u8) {
             consputc(c.into());
 
             // store for consumption by consoleread().
-            cons.buf[cons.e as usize % (*&raw const cons).buf.len()] = c;
-            cons.e += 1;
+            CONS.buf[CONS.e % (*&raw const CONS).buf.len()] = c;
+            CONS.e += 1;
 
             if c == b'\n'
                 || c == ctrl(b'D')
-                || cons.e.wrapping_sub(cons.r) == (*&raw const cons).buf.len().try_into().unwrap()
+                || CONS.e.wrapping_sub(CONS.r) == (*&raw const CONS).buf.len()
             {
                 // wake up consoleread() if a whole line (or end-of-file)
                 // has arrived.
-                cons.w = cons.e;
-                crate::sys::wakeup((&raw mut cons.r).cast());
+                CONS.w = CONS.e;
+                crate::sys::wakeup((&raw mut CONS.r).cast());
             }
         }
 
-        release(&raw mut cons.lock);
+        release(&raw mut CONS.lock);
     }
 }
 
@@ -178,8 +182,6 @@ pub(crate) fn init() {
     use crate::sys::devsw;
 
     unsafe {
-        crate::sys::initlock(&raw mut cons.lock, c"cons".as_ptr().cast_mut());
-
         crate::sys::uartinit();
 
         // connect read and write system calls
