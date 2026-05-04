@@ -21,6 +21,27 @@ const fn ctrl(x: u8) -> u8 {
     x - b'@'
 }
 
+/// send one character to the uart.
+/// called by printf(), and to echo input characters,
+/// but not from write().
+pub(super) fn putc(c: c_int) {
+    use crate::sys::uartputc_sync;
+
+    unsafe {
+        match c {
+            BACKSPACE => {
+                // if the user typed backspace, overwrite with a space.
+                uartputc_sync(b'\x08'.into());
+                uartputc_sync(b' '.into());
+                uartputc_sync(b'\x08'.into());
+            }
+            _ => {
+                uartputc_sync(c);
+            }
+        }
+    }
+}
+
 struct Cons {
     /// input
     buf: [c_char; 128],
@@ -118,8 +139,6 @@ unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int 
 /// do erase/kill processing, append to cons.buf,
 /// wake up consoleread() if a whole line has arrived.
 pub(super) fn intr(mut c: u8) {
-    use crate::sys::consputc;
-
     let mut cons = CONS.lock();
 
     if c == ctrl(b'P') {
@@ -131,28 +150,22 @@ pub(super) fn intr(mut c: u8) {
         // Kill line.
         while cons.e != cons.w && cons.buf[(cons.e - 1) % cons.buf.len()] != b'\n' {
             cons.e -= 1;
-            unsafe {
-                consputc(BACKSPACE);
-            }
+            putc(BACKSPACE);
         }
     } else if c == ctrl(b'H') /* Backspace */ || c == b'\x7f'
     /* Delete key */
     {
         if cons.e != cons.w {
             cons.e -= 1;
-            unsafe {
-                consputc(BACKSPACE);
-            }
+            putc(BACKSPACE);
         }
     } else if c != 0 && cons.e.wrapping_sub(cons.r) < cons.buf.len() {
         if c == b'\r' {
             c = b'\n';
         }
 
-        unsafe {
-            // echo back to the user.
-            consputc(c.into());
-        }
+        // echo back to the user.
+        putc(c.into());
 
         // store for consumption by consoleread().
         let e = cons.e % cons.buf.len();
