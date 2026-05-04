@@ -7,8 +7,9 @@ use riscv::register::{
 };
 
 use crate::{
+    printf::panic,
     riscv::intr,
-    sys::{exit, killed, myproc, printf},
+    sys::{exit, killed, myproc, printf, yield_},
 };
 
 unsafe extern "C" {
@@ -29,7 +30,7 @@ unsafe extern "C" fn usertrap() {
     let mut which_dev = 0;
 
     if sstatus::read().spp() != SPP::User {
-        crate::printf::panic(c"usertrap: not from user mode");
+        panic(c"usertrap: not from user mode");
     }
 
     // send interrupts and exceptions to kerneltrap(),
@@ -90,7 +91,7 @@ unsafe extern "C" fn usertrap() {
 
         // give up the CPU if this is a timer interrupt.
         if which_dev == 2 {
-            crate::sys::yield_();
+            yield_();
         }
 
         usertrapret();
@@ -139,6 +140,46 @@ unsafe extern "C" fn usertrapret() -> ! {
     unsafe {
         core::mem::transmute::<_, unsafe extern "C" fn(usize) -> !>(trampoline_userret)(satp.bits())
     };
+}
+
+/// interrupts and exceptions from kernel code go here via kernelvec,
+/// on whatever the current kernel stack is.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn kerneltrap() {
+    let sepc = sepc::read();
+    let sstatus = sstatus::read();
+
+    if sstatus.spp() != SPP::Supervisor {
+        panic(c"kerneltrap: not from supervisor mode");
+    }
+    if intr::get() {
+        panic(c"kerneltrap: interrupts enabled");
+    }
+
+    unsafe {
+        let which_dev = devintr();
+        if which_dev == 0 {
+            printf(c"scause %p\n".as_ptr().cast_mut(), scause::read().bits());
+            printf(
+                c"sepc=%p stval=%p\n".as_ptr().cast_mut(),
+                sepc,
+                stval::read(),
+            );
+            panic(c"kerneltrap");
+        } else if which_dev == 2
+            && myproc()
+                .as_ref()
+                .is_some_and(|p| p.state == crate::sys::procstate_RUNNING)
+        {
+            // give up the CPU if this is a timer interrupt.
+            yield_();
+        }
+
+        // the yield() may have caused some traps to occur,
+        // so restore trap registers for use by kernelvec.S's sepc instruction.
+        sepc::write(sepc);
+        sstatus::write(sstatus);
+    }
 }
 
 /// Check if it's an external interrupt or software interrupt,
