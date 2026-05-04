@@ -18,7 +18,7 @@
 volatile int panicked = 0;
 
 // lock to avoid interleaving concurrent printf's.
-static struct {
+struct Pr {
   struct spinlock lock;
   int locking;
 } pr;

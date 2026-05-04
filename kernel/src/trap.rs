@@ -8,8 +8,9 @@ use riscv::register::{
 
 use crate::{
     printf::panic,
+    println,
     riscv::intr,
-    sys::{exit, killed, myproc, printf, yield_},
+    sys::{exit, killed, myproc, yield_},
 };
 
 unsafe extern "C" {
@@ -69,15 +70,13 @@ unsafe extern "C" fn usertrap() {
             if which_dev != 0 {
                 // ok
             } else {
-                printf(
-                    c"usertrap(): unexpected scause %p pid=%d\n"
-                        .as_ptr()
-                        .cast_mut(),
+                println!(
+                    "usertrap(): unexpected scause {:x} pid={}",
                     scause::read().bits(),
                     p.pid,
                 );
-                printf(
-                    c"            sepc=%p stval=%p\n".as_ptr().cast_mut(),
+                println!(
+                    "            sepc={:x} stval={:x}",
                     sepc::read(),
                     stval::read(),
                 );
@@ -159,12 +158,8 @@ unsafe extern "C" fn kerneltrap() {
     unsafe {
         let which_dev = devintr();
         if which_dev == 0 {
-            printf(c"scause %p\n".as_ptr().cast_mut(), scause::read().bits());
-            printf(
-                c"sepc=%p stval=%p\n".as_ptr().cast_mut(),
-                sepc,
-                stval::read(),
-            );
+            println!("scause {:x}", scause::read().bits());
+            println!("sepc={sepc:x} stval={:x}", stval::read());
             panic(c"kerneltrap");
         } else if which_dev == 2
             && myproc()
@@ -207,7 +202,7 @@ fn devintr() -> c_int {
                 virtio0::IRQ => virtio_disk_intr(),
                 _ => {
                     if irq != 0 {
-                        printf(c"unexpected interrupt irq=%d\n".as_ptr().cast_mut(), irq)
+                        println!("unexpected interrupt irq={irq}")
                     }
                 }
             }

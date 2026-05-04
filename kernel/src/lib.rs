@@ -1,7 +1,6 @@
 #![no_std]
 
 use core::{
-    ffi::c_int,
     hint,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -24,15 +23,13 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 
 /// start() jumps here in supervisor mode on all CPUs.
 extern "C" fn main() {
-    use crate::sys::printf;
-
     unsafe {
         if proc::cpuid() == 0 {
             console::init();
             sys::printfinit();
-            printf(c"\n".as_ptr().cast_mut());
-            printf(c"xv6 kernel is booting\n".as_ptr().cast_mut());
-            printf(c"\n".as_ptr().cast_mut());
+            println!();
+            println!("xv6 kernel is booting");
+            println!();
             sys::kinit(); // physical page allocator
             sys::kvminit(); // create kernel page table
             sys::kvminithart(); // turn on paging
@@ -51,10 +48,7 @@ extern "C" fn main() {
             while !STARTED.load(Ordering::Acquire) {
                 hint::spin_loop();
             }
-            printf(
-                c"hart %d starting\n".as_ptr().cast_mut(),
-                proc::cpuid() as c_int,
-            );
+            println!("hart {} starting", proc::cpuid());
             sys::kvminithart(); // turn on paging
             sys::trapinithart(); // install kernel trap vector
             sys::plicinithart(); // ask PLIC for device interrupts
