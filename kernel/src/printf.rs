@@ -1,6 +1,7 @@
 use core::{
-    ffi::{CStr, c_int},
+    ffi::c_int,
     fmt::{self, Write},
+    panic::PanicInfo,
 };
 
 use crate::sys::spinlock;
@@ -13,6 +14,7 @@ struct Pr {
 
 unsafe extern "C" {
     static mut pr: Pr;
+    static mut panicked: c_int;
 }
 
 struct ConsoleSink;
@@ -50,8 +52,11 @@ macro_rules! println {
     ($($arg:tt)*) => { $crate::print!("{}\n", format_args!($($arg)*)) };
 }
 
-pub(crate) fn panic(s: &CStr) {
+pub fn panic(panic_info: &PanicInfo) -> ! {
     unsafe {
-        crate::sys::panic(s.as_ptr().cast_mut());
+        pr.locking = 1;
+        println!("panic: {}", panic_info.message());
+        (&raw mut panicked).write_volatile(1);
     }
+    loop {}
 }

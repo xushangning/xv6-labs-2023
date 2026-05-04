@@ -7,7 +7,6 @@ use riscv::register::{
 };
 
 use crate::{
-    printf::panic,
     println,
     riscv::intr,
     sys::{exit, killed, myproc, yield_},
@@ -31,7 +30,7 @@ unsafe extern "C" fn usertrap() {
     let mut which_dev = 0;
 
     if sstatus::read().spp() != SPP::User {
-        panic(c"usertrap: not from user mode");
+        panic!("usertrap: not from user mode");
     }
 
     // send interrupts and exceptions to kerneltrap(),
@@ -149,10 +148,10 @@ unsafe extern "C" fn kerneltrap() {
     let sstatus = sstatus::read();
 
     if sstatus.spp() != SPP::Supervisor {
-        panic(c"kerneltrap: not from supervisor mode");
+        panic!("kerneltrap: not from supervisor mode");
     }
     if intr::get() {
-        panic(c"kerneltrap: interrupts enabled");
+        panic!("kerneltrap: interrupts enabled");
     }
 
     unsafe {
@@ -160,7 +159,7 @@ unsafe extern "C" fn kerneltrap() {
         if which_dev == 0 {
             println!("scause {:x}", scause::read().bits());
             println!("sepc={sepc:x} stval={:x}", stval::read());
-            panic(c"kerneltrap");
+            panic!("kerneltrap");
         } else if which_dev == 2
             && myproc()
                 .as_ref()

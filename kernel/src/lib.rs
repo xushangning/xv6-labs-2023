@@ -19,6 +19,8 @@ mod trampoline;
 mod trap;
 mod uart;
 
+pub use printf::panic;
+
 static STARTED: AtomicBool = AtomicBool::new(false);
 
 /// start() jumps here in supervisor mode on all CPUs.
