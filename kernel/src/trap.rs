@@ -63,7 +63,7 @@ unsafe extern "C" fn usertrap() {
             // so enable only now that we're done with those registers.
             intr::on();
 
-            crate::sys::syscall();
+            crate::syscall::syscall();
         } else {
             which_dev = devintr();
             if which_dev != 0 {

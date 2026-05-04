@@ -15,6 +15,7 @@ mod riscv;
 mod spinlock;
 mod start;
 mod sys;
+mod syscall;
 mod trampoline;
 mod trap;
 mod uart;
