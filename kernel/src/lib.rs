@@ -13,6 +13,7 @@ mod param;
 mod printf;
 mod proc;
 mod riscv;
+mod spinlock;
 mod start;
 mod sys;
 mod trampoline;
