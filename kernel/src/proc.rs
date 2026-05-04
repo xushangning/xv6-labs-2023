@@ -1,4 +1,8 @@
-use core::{ffi::c_int, ptr};
+use core::{
+    ffi::c_int,
+    ptr,
+    sync::atomic::{AtomicI32, Ordering},
+};
 
 use crate::{
     riscv::PGSIZE,
@@ -10,11 +14,16 @@ unsafe extern "C" {
 
     static mut initproc: *mut proc_;
 
-    fn allocpid() -> c_int;
     fn freeproc(p: *mut proc_);
     static mut wait_lock: spinlock;
 
     fn forkret();
+}
+
+fn allocpid() -> c_int {
+    static NEXT_PID: AtomicI32 = AtomicI32::new(1);
+
+    NEXT_PID.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Look in the process table for an UNUSED proc.
