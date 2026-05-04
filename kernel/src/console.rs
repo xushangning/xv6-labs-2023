@@ -170,7 +170,7 @@ pub(super) fn intr(mut c: u8) {
     }
 }
 
-pub(crate) fn init() {
+pub(super) fn init() {
     use crate::sys::devsw;
 
     unsafe {

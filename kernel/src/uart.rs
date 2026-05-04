@@ -7,7 +7,7 @@ unsafe extern "C" {
 /// handle a uart interrupt, raised because input has
 /// arrived, or the uart is ready for more output, or
 /// both. called from devintr().
-pub(crate) fn intr() {
+pub(super) fn intr() {
     // read and process incoming characters.
     loop {
         let c = unsafe { crate::sys::uartgetc() };
