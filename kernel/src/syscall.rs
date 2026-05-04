@@ -2,9 +2,10 @@ use core::ffi::CStr;
 
 use crate::sys::myproc;
 
+mod proc;
+
 // Prototypes for the functions that handle system calls.
 unsafe extern "C" {
-    fn sys_fork() -> u64;
     fn sys_exit() -> u64;
     fn sys_wait() -> u64;
     fn sys_pipe() -> u64;
@@ -31,7 +32,7 @@ unsafe extern "C" {
 /// to the function that handles the system call.
 static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     None,
-    Some(sys_fork),
+    Some(proc::fork),
     Some(sys_exit),
     Some(sys_wait),
     Some(sys_pipe),
