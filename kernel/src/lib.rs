@@ -45,7 +45,7 @@ extern "C" fn main() {
             sys::iinit(); // inode table
             sys::fileinit(); // file table
             sys::virtio_disk_init(); // emulated hard disk
-            sys::userinit(); // first user process
+            proc::userinit(); // first user process
             STARTED.store(true, Ordering::Release);
         } else {
             while !STARTED.load(Ordering::Acquire) {
