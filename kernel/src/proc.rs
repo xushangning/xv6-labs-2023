@@ -1,11 +1,63 @@
-use core::ffi::c_int;
+use core::{ffi::c_int, ptr};
 
-use crate::sys::{proc_, spinlock};
+use crate::{
+    riscv::PGSIZE,
+    sys::{acquire, proc_, release, spinlock},
+};
 
 unsafe extern "C" {
-    fn allocproc() -> *mut proc_;
+    static mut proc: [proc_; 64];
+
+    fn allocpid() -> c_int;
     fn freeproc(p: *mut proc_);
     static mut wait_lock: spinlock;
+
+    fn forkret();
+}
+
+/// Look in the process table for an UNUSED proc.
+/// If found, initialize state required to run in the kernel,
+/// and return with p->lock held.
+/// If there are no free procs, or a memory allocation fails, return 0.
+fn allocproc() -> *mut proc_ {
+    use crate::sys::{procstate_UNUSED, procstate_USED};
+
+    unsafe {
+        for p in &mut *&raw mut proc {
+            acquire(&mut p.lock);
+            if p.state == procstate_UNUSED {
+                p.pid = allocpid();
+                p.state = procstate_USED;
+
+                // Allocate a trapframe page.
+                p.trapframe = crate::sys::kalloc().cast();
+                if p.trapframe.is_null() {
+                    freeproc(p);
+                    release(&mut p.lock);
+                    return ptr::null_mut();
+                }
+
+                // An empty user page table.
+                p.pagetable = crate::sys::proc_pagetable(p);
+                if p.pagetable.is_null() {
+                    freeproc(p);
+                    release(&mut p.lock);
+                    return ptr::null_mut();
+                }
+
+                // Set up new context to start executing at forkret,
+                // which returns to user space.
+                (&raw mut p.context).write_bytes(0, 1);
+                p.context.ra = (forkret as *const ()).addr().try_into().unwrap();
+                p.context.sp = p.kstack + PGSIZE as u64;
+
+                return p;
+            } else {
+                release(&mut p.lock);
+            }
+        }
+    }
+    ptr::null_mut()
 }
 
 /// Must be called with interrupts disabled,
@@ -18,9 +70,7 @@ pub(super) unsafe fn cpuid() -> usize {
 /// Create a new process, copying the parent.
 /// Sets up child kernel stack to return as if from fork() system call.
 pub(super) fn fork() -> c_int {
-    use crate::sys::{
-        NOFILE, acquire, filedup, idup, myproc, procstate_RUNNABLE, release, safestrcpy, uvmcopy,
-    };
+    use crate::sys::{NOFILE, filedup, idup, myproc, procstate_RUNNABLE, safestrcpy, uvmcopy};
 
     let p = unsafe { myproc().as_mut().unwrap() };
 
