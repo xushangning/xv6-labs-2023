@@ -24,7 +24,7 @@ OBJS = \
   $K/src/trap.rs \
   $K/src/syscall.rs \
   $K/syscall.o \
-  $K/sysproc.o \
+  $K/src/syscall/proc.rs \
   $K/bio.o \
   $K/fs.o \
   $K/log.o \

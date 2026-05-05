@@ -71,3 +71,14 @@ pub(super) unsafe extern "C" fn kill() -> u64 {
         .cast_unsigned()
         .into()
 }
+
+pub(super) unsafe extern "C" fn uptime() -> u64 {
+    use crate::sys::{acquire, release, ticks, tickslock};
+
+    unsafe {
+        acquire(&raw mut tickslock);
+        let xticks = ticks;
+        release(&raw mut tickslock);
+        xticks.into()
+    }
+}

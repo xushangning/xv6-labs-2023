@@ -11,7 +11,6 @@ fn main() {
             "swtch.S",
             "trap.c",
             "syscall.c",
-            "sysproc.c",
             "bio.c",
             "fs.c",
             "log.c",
