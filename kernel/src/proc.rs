@@ -6,7 +6,9 @@ use core::{
 
 use crate::{
     riscv::PGSIZE,
-    sys::{acquire, proc_, procstate_RUNNABLE, procstate_UNUSED, release, safestrcpy, spinlock},
+    sys::{
+        acquire, myproc, proc_, procstate_RUNNABLE, procstate_UNUSED, release, safestrcpy, spinlock,
+    },
 };
 
 unsafe extern "C" {
@@ -148,7 +150,7 @@ pub(super) fn userinit() {
 /// Create a new process, copying the parent.
 /// Sets up child kernel stack to return as if from fork() system call.
 pub(super) fn fork() -> c_int {
-    use crate::sys::{NOFILE, filedup, idup, myproc, uvmcopy};
+    use crate::sys::{NOFILE, filedup, idup, uvmcopy};
 
     let p = unsafe { myproc().as_mut().unwrap() };
 
@@ -206,6 +208,61 @@ pub(super) fn fork() -> c_int {
     pid
 }
 
+/// Wait for a child process to exit and return its pid.
+/// Return -1 if this process has no children.
+pub(super) fn wait(addr: u64) -> c_int {
+    use crate::sys::{copyout, killed, procstate_ZOMBIE, sleep};
+
+    let p = unsafe { myproc().as_mut().unwrap() };
+
+    unsafe {
+        acquire(&raw mut wait_lock);
+
+        loop {
+            // Scan through table looking for exited children.
+            let mut havekids = false;
+            for pp in &mut *&raw mut proc {
+                if pp.parent == p {
+                    // make sure the child isn't still in exit() or swtch().
+                    acquire(&mut pp.lock);
+
+                    havekids = true;
+                    if pp.state == procstate_ZOMBIE {
+                        // Found one.
+                        let pid = pp.pid;
+                        if addr != 0
+                            && copyout(
+                                p.pagetable,
+                                addr,
+                                (&raw mut pp.xstate).cast(),
+                                core::mem::size_of_val(&pp.xstate).try_into().unwrap(),
+                            ) < 0
+                        {
+                            release(&mut pp.lock);
+                            release(&raw mut wait_lock);
+                            return -1;
+                        }
+                        ptr::drop_in_place(pp);
+                        release(&mut pp.lock);
+                        release(&raw mut wait_lock);
+                        return pid;
+                    }
+                    release(&mut pp.lock);
+                }
+            }
+
+            // No point waiting if we don't have any children.
+            if !havekids || killed(p) != 0 {
+                release(&raw mut wait_lock);
+                return -1;
+            }
+
+            // Wait for a child to exit.
+            sleep(ptr::from_mut(p).cast(), &raw mut wait_lock); //DOC: wait-sleep
+        }
+    }
+}
+
 /// A fork child's very first scheduling by scheduler()
 /// will swtch to forkret.
 extern "C" fn forkret() {
@@ -213,7 +270,7 @@ extern "C" fn forkret() {
 
     // Still holding p->lock from scheduler.
     unsafe {
-        release(&mut (*crate::sys::myproc()).lock);
+        release(&mut (*myproc()).lock);
     }
 
     if FIRST.load(Ordering::Relaxed) {
