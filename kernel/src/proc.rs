@@ -124,11 +124,7 @@ pub(super) fn userinit() {
 
         // allocate one user page and copy initcode's instructions
         // and data into it.
-        crate::sys::uvmfirst(
-            p.pagetable,
-            INITCODE.as_ptr().cast_mut(),
-            INITCODE.len().try_into().unwrap(),
-        );
+        crate::vm::uvmfirst(p.pagetable, INITCODE);
         p.sz = PGSIZE.try_into().unwrap();
 
         // prepare for the very first "return" from kernel to user.

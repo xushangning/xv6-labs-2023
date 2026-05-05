@@ -19,6 +19,7 @@ mod syscall;
 mod trampoline;
 mod trap;
 mod uart;
+mod vm;
 
 pub use printf::panic;
 

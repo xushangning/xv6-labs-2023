@@ -17,6 +17,7 @@ OBJS = \
   $K/src/param.rs \
   $K/src/riscv.rs \
   $K/vm.o \
+  $K/src/vm.rs \
   $K/src/proc.rs \
   $K/swtch.o \
   $K/src/trampoline.rs \
