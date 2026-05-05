@@ -3,7 +3,8 @@ use core::ffi::{c_int, c_uint};
 use riscv::register::{
     satp, scause, sepc,
     sstatus::{self, SPP},
-    stval, stvec,
+    stval,
+    stvec::{self, Stvec},
 };
 
 use crate::{
@@ -24,6 +25,16 @@ unsafe extern "C" {
     fn kernelvec();
 }
 
+/// set up to take exceptions and traps while in the kernel.
+pub(super) fn inithart() {
+    unsafe {
+        stvec::write(Stvec::new(
+            (kernelvec as *const ()).addr(),
+            stvec::TrapMode::Direct,
+        ));
+    }
+}
+
 /// handle an interrupt, exception, or system call from user space.
 /// called from trampoline.S
 #[unsafe(no_mangle)]
@@ -37,7 +48,7 @@ unsafe extern "C" fn usertrap() {
     // send interrupts and exceptions to kerneltrap(),
     // since we're now in the kernel.
     unsafe {
-        stvec::write(stvec::Stvec::new(
+        stvec::write(Stvec::new(
             (kernelvec as *const ()).addr(),
             stvec::TrapMode::Direct,
         ));
@@ -110,10 +121,7 @@ pub(super) fn usertrapret() -> ! {
     let trampoline_uservec =
         TRAMPOLINE + ((uservec as *const ()).addr() - (trampoline as *const ()).addr());
     unsafe {
-        stvec::write(stvec::Stvec::new(
-            trampoline_uservec,
-            stvec::TrapMode::Direct,
-        ));
+        stvec::write(Stvec::new(trampoline_uservec, stvec::TrapMode::Direct));
     }
 
     let trapframe = unsafe { &mut *p.trapframe };

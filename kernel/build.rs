@@ -9,7 +9,6 @@ fn main() {
             "vm.c",
             "proc.c",
             "swtch.S",
-            "trap.c",
             "syscall.c",
             "bio.c",
             "fs.c",

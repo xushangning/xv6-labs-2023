@@ -38,7 +38,7 @@ extern "C" fn main() {
             sys::kvminit(); // create kernel page table
             sys::kvminithart(); // turn on paging
             sys::procinit(); // process table
-            sys::trapinithart(); // install kernel trap vector
+            trap::inithart(); // install kernel trap vector
             sys::plicinit(); // set up interrupt controller
             sys::plicinithart(); // ask PLIC for device interrupts
             sys::binit(); // buffer cache
@@ -53,7 +53,7 @@ extern "C" fn main() {
             }
             println!("hart {} starting", proc::cpuid());
             sys::kvminithart(); // turn on paging
-            sys::trapinithart(); // install kernel trap vector
+            trap::inithart(); // install kernel trap vector
             sys::plicinithart(); // ask PLIC for device interrupts
         }
 
