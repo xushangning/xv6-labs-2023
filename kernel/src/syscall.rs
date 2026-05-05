@@ -13,7 +13,6 @@ unsafe extern "C" {
     fn sys_fstat() -> u64;
     fn sys_chdir() -> u64;
     fn sys_dup() -> u64;
-    fn sys_getpid() -> u64;
     fn sys_sbrk() -> u64;
     fn sys_sleep() -> u64;
     fn sys_uptime() -> u64;
@@ -40,7 +39,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(sys_fstat),
     Some(sys_chdir),
     Some(sys_dup),
-    Some(sys_getpid),
+    Some(proc::getpid),
     Some(sys_sbrk),
     Some(sys_sleep),
     Some(sys_uptime),

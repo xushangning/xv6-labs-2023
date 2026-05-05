@@ -6,6 +6,10 @@ pub(super) unsafe extern "C" fn exit() -> u64 {
     crate::proc::exit(unsafe { n.assume_init() })
 }
 
+pub(super) unsafe extern "C" fn getpid() -> u64 {
+    unsafe { (*crate::sys::myproc()).pid.cast_unsigned().into() }
+}
+
 pub(super) unsafe extern "C" fn fork() -> u64 {
     crate::proc::fork().cast_unsigned().into()
 }
