@@ -1,4 +1,4 @@
-use core::ffi::c_int;
+use core::ffi::{c_int, c_uint};
 
 use riscv::register::{
     satp, scause, sepc,
@@ -9,8 +9,11 @@ use riscv::register::{
 use crate::{
     println,
     riscv::intr,
+    spinlock::Mutex,
     sys::{exit, killed, myproc, yield_},
 };
+
+pub(super) static TICKS: Mutex<c_uint> = Mutex::new(c"time", 0);
 
 unsafe extern "C" {
     fn trampoline();
@@ -19,8 +22,6 @@ unsafe extern "C" {
 
     /// in kernelvec.S, calls kerneltrap().
     fn kernelvec();
-
-    fn clockintr();
 }
 
 /// handle an interrupt, exception, or system call from user space.
@@ -172,6 +173,14 @@ unsafe extern "C" fn kerneltrap() {
         // so restore trap registers for use by kernelvec.S's sepc instruction.
         sepc::write(sepc);
         sstatus::write(sstatus);
+    }
+}
+
+fn clockintr() {
+    let mut ticks = TICKS.lock();
+    *ticks += 1;
+    unsafe {
+        crate::sys::wakeup((&raw const TICKS).cast_mut().cast());
     }
 }
 

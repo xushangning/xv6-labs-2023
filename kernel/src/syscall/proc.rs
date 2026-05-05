@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use crate::sys::myproc;
+use crate::{sys::myproc, trap::TICKS};
 
 pub(super) unsafe extern "C" fn exit() -> u64 {
     let mut n = MaybeUninit::uninit();
@@ -37,7 +37,7 @@ pub(super) unsafe extern "C" fn sbrk() -> u64 {
 // tests set a breakpoint at the name sys_sleep during testing.
 #[unsafe(export_name = "sys_sleep")]
 pub(super) unsafe extern "C" fn sleep() -> u64 {
-    use crate::sys::{acquire, killed, release, ticks, tickslock};
+    use crate::sys::killed;
 
     let mut n = {
         let mut n = MaybeUninit::uninit();
@@ -49,17 +49,15 @@ pub(super) unsafe extern "C" fn sleep() -> u64 {
     if n < 0 {
         n = 0;
     }
-    unsafe {
-        acquire(&raw mut tickslock);
-        let ticks0 = ticks;
-        while ticks - ticks0 < n.try_into().unwrap() {
+    let ticks = TICKS.lock();
+    let ticks0 = *ticks;
+    while *ticks - ticks0 < n.try_into().unwrap() {
+        unsafe {
             if killed(myproc()) != 0 {
-                release(&raw mut tickslock);
                 return (-1i64).cast_unsigned();
             }
-            crate::sys::sleep((&raw mut ticks).cast(), &raw mut tickslock);
+            crate::sys::sleep((&raw const TICKS).cast_mut().cast(), ticks.lock.inner.get());
         }
-        release(&raw mut tickslock);
     }
     0
 }
@@ -73,12 +71,5 @@ pub(super) unsafe extern "C" fn kill() -> u64 {
 }
 
 pub(super) unsafe extern "C" fn uptime() -> u64 {
-    use crate::sys::{acquire, release, ticks, tickslock};
-
-    unsafe {
-        acquire(&raw mut tickslock);
-        let xticks = ticks;
-        release(&raw mut tickslock);
-        xticks.into()
-    }
+    (*TICKS.lock()).into()
 }

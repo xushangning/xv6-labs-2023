@@ -37,7 +37,6 @@ extern "C" fn main() {
             sys::kvminit(); // create kernel page table
             sys::kvminithart(); // turn on paging
             sys::procinit(); // process table
-            sys::trapinit(); // trap vectors
             sys::trapinithart(); // install kernel trap vector
             sys::plicinit(); // set up interrupt controller
             sys::plicinithart(); // ask PLIC for device interrupts
