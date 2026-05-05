@@ -148,6 +148,33 @@ pub(super) fn userinit() {
     }
 }
 
+/// Grow or shrink user memory by n bytes.
+/// Return 0 on success, -1 on failure.
+pub(super) fn growproc(n: c_int) -> c_int {
+    use crate::sys::{PTE_W, uvmalloc, uvmdealloc};
+
+    let p = unsafe { myproc().as_mut().unwrap() };
+
+    let mut sz = p.sz;
+    if n > 0 {
+        sz = unsafe {
+            uvmalloc(
+                p.pagetable,
+                sz,
+                sz.wrapping_add(n as u64),
+                PTE_W.cast_signed(),
+            )
+        };
+        if sz == 0 {
+            return -1;
+        }
+    } else if n < 0 {
+        sz = unsafe { uvmdealloc(p.pagetable, sz, sz.wrapping_sub((-n) as u64)) };
+    }
+    p.sz = sz;
+    0
+}
+
 /// Create a new process, copying the parent.
 /// Sets up child kernel stack to return as if from fork() system call.
 pub(super) fn fork() -> c_int {
