@@ -51,17 +51,20 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
 pub(super) unsafe fn syscall() {
     let p = unsafe { myproc().as_mut().unwrap() };
 
-    let num = usize::try_from(unsafe { (*p.trapframe).a7 }).unwrap();
+    let num =
+        usize::try_from(unsafe { p.trapframe.as_ref().unwrap().assume_init_ref().a7 }).unwrap();
     if let Some(f) = SYSCALLS.get(num).and_then(|e| e.as_ref()) {
         // Use num to lookup the system call function for num, call it,
         // and store its return value in p->trapframe->a0
-        unsafe { (*p.trapframe).a0 = f() };
+        unsafe { p.trapframe.as_mut().unwrap().assume_init_mut().a0 = f() };
     } else {
         crate::println!(
             "{} {}: unknown sys call {num}",
             p.pid,
             unsafe { CStr::from_ptr(p.name.as_ptr()) }.to_str().unwrap(),
         );
-        unsafe { (*p.trapframe).a0 = (-1i64).cast_unsigned() };
+        unsafe {
+            p.trapframe.as_mut().unwrap().assume_init_mut().a0 = (-1i64).cast_unsigned();
+        }
     }
 }

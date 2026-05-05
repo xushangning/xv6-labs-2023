@@ -1,4 +1,7 @@
 #![no_std]
+#![feature(allocator_api)]
+
+extern crate alloc;
 
 use core::{
     hint,
@@ -6,6 +9,7 @@ use core::{
 };
 
 mod console;
+mod kalloc;
 mod kernelvec;
 mod memlayout;
 mod param;
@@ -21,6 +25,7 @@ mod trap;
 mod uart;
 mod vm;
 
+pub use kalloc::Allocator;
 pub use printf::panic;
 
 static STARTED: AtomicBool = AtomicBool::new(false);

@@ -43,7 +43,8 @@ fn main() {
         .header("wrapper.h")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .use_core()
-        .no_copy("proc_")
+        .blocklist_type("proc_")
+        .raw_line("type proc_ = crate::proc::Proc;")
         .generate()
         .expect("Unable to generate bindings");
 

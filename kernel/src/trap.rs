@@ -58,7 +58,7 @@ unsafe extern "C" fn usertrap() {
 
     unsafe {
         // save user program counter.
-        (*p.trapframe).epc = sepc::read().try_into().unwrap();
+        p.trapframe.as_mut().unwrap().assume_init_mut().epc = sepc::read().try_into().unwrap();
 
         if scause::read().bits() == 8 {
             // system call
@@ -69,7 +69,7 @@ unsafe extern "C" fn usertrap() {
 
             // sepc points to the ecall instruction,
             // but we want to return to the next instruction.
-            (*p.trapframe).epc += 4;
+            p.trapframe.as_mut().unwrap().assume_init_mut().epc += 4;
 
             // an interrupt will change sepc, scause, and sstatus,
             // so enable only now that we're done with those registers.
@@ -124,7 +124,7 @@ pub(super) fn usertrapret() -> ! {
         stvec::write(Stvec::new(trampoline_uservec, stvec::TrapMode::Direct));
     }
 
-    let trapframe = unsafe { &mut *p.trapframe };
+    let trapframe = unsafe { p.trapframe.as_mut().unwrap().assume_init_mut() };
     trapframe.kernel_satp = satp::read().bits().try_into().unwrap();
     trapframe.kernel_sp = p.kstack + u64::try_from(crate::riscv::PGSIZE).unwrap();
     trapframe.kernel_trap = (usertrap as *const ()).addr().try_into().unwrap();

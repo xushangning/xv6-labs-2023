@@ -1,5 +1,7 @@
+use alloc::boxed::Box;
 use core::{
-    ffi::c_int,
+    ffi::{c_char, c_int, c_void},
+    mem::MaybeUninit,
     ptr,
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
@@ -7,15 +9,34 @@ use core::{
 use crate::{
     riscv::PGSIZE,
     sys::{
-        acquire, myproc, proc_, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
+        acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
         safestrcpy, spinlock, wakeup,
     },
 };
 
-unsafe extern "C" {
-    static mut proc: [proc_; 64];
+#[repr(C)]
+pub(super) struct Proc {
+    pub lock: spinlock,
+    pub state: crate::sys::procstate,
+    pub chan: *mut c_void,
+    pub killed: c_int,
+    pub xstate: c_int,
+    pub pid: c_int,
+    pub parent: *mut Proc,
+    pub kstack: u64,
+    pub sz: u64,
+    pub pagetable: crate::sys::pagetable_t,
+    pub trapframe: Option<Box<MaybeUninit<crate::sys::trapframe>>>,
+    pub context: crate::sys::context,
+    pub ofile: [*mut crate::sys::file; 16],
+    pub cwd: *mut crate::sys::inode,
+    pub name: [c_char; 16],
+}
 
-    static mut initproc: *mut proc_;
+unsafe extern "C" {
+    static mut proc: [Proc; 64];
+
+    static mut initproc: *mut Proc;
 
     static mut wait_lock: spinlock;
 }
@@ -30,19 +51,21 @@ fn allocpid() -> c_int {
 /// If found, initialize state required to run in the kernel,
 /// and return with p->lock held.
 /// If there are no free procs, or a memory allocation fails, return 0.
-fn allocproc() -> *mut proc_ {
+fn allocproc() -> *mut Proc {
     use crate::sys::procstate_USED;
 
-    unsafe {
-        for p in &mut *&raw mut proc {
+    for p in unsafe { &mut *&raw mut proc } {
+        unsafe {
             acquire(&mut p.lock);
-            if p.state == procstate_UNUSED {
-                p.pid = allocpid();
-                p.state = procstate_USED;
+        }
+        if p.state == procstate_UNUSED {
+            p.pid = allocpid();
+            p.state = procstate_USED;
 
+            unsafe {
                 // Allocate a trapframe page.
-                p.trapframe = crate::sys::kalloc().cast();
-                if p.trapframe.is_null() {
+                p.trapframe = Box::try_new_uninit().ok();
+                if p.trapframe.is_none() {
                     ptr::drop_in_place(p);
                     release(&mut p.lock);
                     return ptr::null_mut();
@@ -63,7 +86,9 @@ fn allocproc() -> *mut proc_ {
                 p.context.sp = p.kstack + PGSIZE as u64;
 
                 return p;
-            } else {
+            }
+        } else {
+            unsafe {
                 release(&mut p.lock);
             }
         }
@@ -74,14 +99,9 @@ fn allocproc() -> *mut proc_ {
 /// free a proc structure and the data hanging from it,
 /// including user pages.
 /// p->lock must be held.
-impl Drop for proc_ {
+impl Drop for Proc {
     fn drop(&mut self) {
-        if !self.trapframe.is_null() {
-            unsafe {
-                crate::sys::kfree(self.trapframe.cast());
-            }
-        }
-        self.trapframe = ptr::null_mut();
+        self.trapframe = None;
         if !self.pagetable.is_null() {
             unsafe {
                 crate::sys::proc_freepagetable(self.pagetable, self.sz);
@@ -128,8 +148,9 @@ pub(super) fn userinit() {
         p.sz = PGSIZE.try_into().unwrap();
 
         // prepare for the very first "return" from kernel to user.
-        (*p.trapframe).epc = 0; // user program counter
-        (*p.trapframe).sp = PGSIZE.try_into().unwrap(); // user stack pointer
+        let trapframe = p.trapframe.as_mut().unwrap().assume_init_mut();
+        trapframe.epc = 0; // user program counter
+        trapframe.sp = PGSIZE.try_into().unwrap(); // user stack pointer
 
         safestrcpy(
             p.name.as_mut_ptr(),
@@ -195,10 +216,11 @@ pub(super) fn fork() -> c_int {
 
     // copy saved user registers.
     unsafe {
-        *np.trapframe = *p.trapframe;
+        *np.trapframe.as_mut().unwrap().assume_init_mut() =
+            *p.trapframe.as_ref().unwrap().assume_init_ref();
 
         // Cause fork to return 0 in the child.
-        (*np.trapframe).a0 = 0;
+        np.trapframe.as_mut().unwrap().assume_init_mut().a0 = 0;
 
         // increment reference counts on open file descriptors.
         for i in 0..NOFILE as usize {
@@ -234,7 +256,7 @@ pub(super) fn fork() -> c_int {
 
 /// Pass p's abandoned children to init.
 /// Caller must hold wait_lock.
-fn reparent(p: *mut proc_) {
+fn reparent(p: *mut Proc) {
     unsafe {
         for pp in &mut *&raw mut proc {
             if pp.parent == p {
