@@ -45,6 +45,7 @@ fn main() {
         .header("wrapper.h")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .use_core()
+        .no_copy("proc_")
         .generate()
         .expect("Unable to generate bindings");
 

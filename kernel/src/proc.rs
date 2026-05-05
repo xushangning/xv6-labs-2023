@@ -6,7 +6,7 @@ use core::{
 
 use crate::{
     riscv::PGSIZE,
-    sys::{acquire, proc_, procstate_RUNNABLE, release, safestrcpy, spinlock},
+    sys::{acquire, proc_, procstate_RUNNABLE, procstate_UNUSED, release, safestrcpy, spinlock},
 };
 
 unsafe extern "C" {
@@ -14,7 +14,6 @@ unsafe extern "C" {
 
     static mut initproc: *mut proc_;
 
-    fn freeproc(p: *mut proc_);
     static mut wait_lock: spinlock;
 
     fn forkret();
@@ -31,7 +30,7 @@ fn allocpid() -> c_int {
 /// and return with p->lock held.
 /// If there are no free procs, or a memory allocation fails, return 0.
 fn allocproc() -> *mut proc_ {
-    use crate::sys::{procstate_UNUSED, procstate_USED};
+    use crate::sys::procstate_USED;
 
     unsafe {
         for p in &mut *&raw mut proc {
@@ -43,7 +42,7 @@ fn allocproc() -> *mut proc_ {
                 // Allocate a trapframe page.
                 p.trapframe = crate::sys::kalloc().cast();
                 if p.trapframe.is_null() {
-                    freeproc(p);
+                    ptr::drop_in_place(p);
                     release(&mut p.lock);
                     return ptr::null_mut();
                 }
@@ -51,7 +50,7 @@ fn allocproc() -> *mut proc_ {
                 // An empty user page table.
                 p.pagetable = crate::sys::proc_pagetable(p);
                 if p.pagetable.is_null() {
-                    freeproc(p);
+                    ptr::drop_in_place(p);
                     release(&mut p.lock);
                     return ptr::null_mut();
                 }
@@ -69,6 +68,34 @@ fn allocproc() -> *mut proc_ {
         }
     }
     ptr::null_mut()
+}
+
+/// free a proc structure and the data hanging from it,
+/// including user pages.
+/// p->lock must be held.
+impl Drop for proc_ {
+    fn drop(&mut self) {
+        if !self.trapframe.is_null() {
+            unsafe {
+                crate::sys::kfree(self.trapframe.cast());
+            }
+        }
+        self.trapframe = ptr::null_mut();
+        if !self.pagetable.is_null() {
+            unsafe {
+                crate::sys::proc_freepagetable(self.pagetable, self.sz);
+            }
+        }
+        self.pagetable = ptr::null_mut();
+        self.sz = 0;
+        self.pid = 0;
+        self.parent = ptr::null_mut();
+        self.name[0] = 0;
+        self.chan = ptr::null_mut();
+        self.killed = 0;
+        self.xstate = 0;
+        self.state = procstate_UNUSED;
+    }
 }
 
 /// Must be called with interrupts disabled,
@@ -135,7 +162,7 @@ pub(super) fn fork() -> c_int {
     // Copy user memory from parent to child.
     if unsafe { uvmcopy(p.pagetable, np.pagetable, p.sz) } < 0 {
         unsafe {
-            freeproc(np);
+            ptr::drop_in_place(np);
             release(&mut np.lock);
         }
         return -1;
