@@ -8,7 +8,6 @@ mod proc;
 unsafe extern "C" {
     fn sys_pipe() -> u64;
     fn sys_read() -> u64;
-    fn sys_kill() -> u64;
     fn sys_exec() -> u64;
     fn sys_fstat() -> u64;
     fn sys_chdir() -> u64;
@@ -34,7 +33,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(proc::wait),
     Some(sys_pipe),
     Some(sys_read),
-    Some(sys_kill),
+    Some(proc::kill),
     Some(sys_exec),
     Some(sys_fstat),
     Some(sys_chdir),

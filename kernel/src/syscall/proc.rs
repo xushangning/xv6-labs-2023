@@ -19,3 +19,9 @@ pub(super) unsafe extern "C" fn wait() -> u64 {
     unsafe { crate::sys::argaddr(0, &mut p) };
     crate::proc::wait(p).cast_unsigned().into()
 }
+
+pub(super) unsafe extern "C" fn kill() -> u64 {
+    let mut pid = MaybeUninit::uninit();
+    unsafe { crate::sys::argint(0, pid.as_mut_ptr()) };
+    crate::proc::kill(unsafe { pid.assume_init() }).cast_unsigned().into()
+}

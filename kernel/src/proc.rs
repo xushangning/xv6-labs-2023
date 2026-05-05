@@ -349,3 +349,27 @@ extern "C" fn forkret() {
 
     crate::trap::usertrapret();
 }
+
+/// Kill the process with the given pid.
+/// The victim won't exit until it tries to return
+/// to user space (see usertrap() in trap.c).
+pub(super) fn kill(pid: c_int) -> c_int {
+    use crate::sys::procstate_SLEEPING;
+
+    unsafe {
+        for p in &mut *&raw mut proc {
+            acquire(&mut p.lock);
+            if p.pid == pid {
+                p.killed = 1;
+                if p.state == procstate_SLEEPING {
+                    // Wake process from sleep().
+                    p.state = procstate_RUNNABLE;
+                }
+                release(&mut p.lock);
+                return 0;
+            }
+            release(&mut p.lock);
+        }
+    }
+    -1
+}
