@@ -1,3 +1,11 @@
+use core::mem::MaybeUninit;
+
+pub(super) unsafe extern "C" fn exit() -> u64 {
+    let mut n = MaybeUninit::uninit();
+    unsafe { crate::sys::argint(0, n.as_mut_ptr()) };
+    crate::proc::exit(unsafe { n.assume_init() })
+}
+
 pub(super) unsafe extern "C" fn fork() -> u64 {
     crate::proc::fork().cast_unsigned().into()
 }

@@ -7,7 +7,8 @@ use core::{
 use crate::{
     riscv::PGSIZE,
     sys::{
-        acquire, myproc, proc_, procstate_RUNNABLE, procstate_UNUSED, release, safestrcpy, spinlock,
+        acquire, myproc, proc_, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
+        safestrcpy, spinlock, wakeup,
     },
 };
 
@@ -208,10 +209,72 @@ pub(super) fn fork() -> c_int {
     pid
 }
 
+/// Pass p's abandoned children to init.
+/// Caller must hold wait_lock.
+fn reparent(p: *mut proc_) {
+    unsafe {
+        for pp in &mut *&raw mut proc {
+            if pp.parent == p {
+                pp.parent = initproc;
+                wakeup(initproc.cast());
+            }
+        }
+    }
+}
+
+/// Exit the current process.  Does not return.
+/// An exited process remains in the zombie state
+/// until its parent calls wait().
+pub(super) fn exit(status: c_int) -> ! {
+    use crate::sys::sched;
+
+    let p = unsafe { myproc().as_mut().unwrap() };
+
+    if ptr::from_mut(p) == unsafe { initproc } {
+        panic!("init exiting");
+    }
+
+    // Close all open files.
+    for of in &mut p.ofile {
+        if !of.is_null() {
+            unsafe {
+                crate::sys::fileclose(*of);
+            }
+            *of = ptr::null_mut();
+        }
+    }
+
+    unsafe {
+        crate::sys::begin_op();
+        crate::sys::iput(p.cwd);
+        crate::sys::end_op();
+        p.cwd = ptr::null_mut();
+
+        acquire(&raw mut wait_lock);
+
+        // Give any children to init.
+        reparent(p);
+
+        // Parent might be sleeping in wait().
+        wakeup(p.parent.cast());
+
+        acquire(&mut p.lock);
+
+        p.xstate = status;
+        p.state = procstate_ZOMBIE;
+
+        release(&raw mut wait_lock);
+
+        // Jump into the scheduler, never to return.
+        sched();
+    }
+    panic!("zombie exit");
+}
+
 /// Wait for a child process to exit and return its pid.
 /// Return -1 if this process has no children.
 pub(super) fn wait(addr: u64) -> c_int {
-    use crate::sys::{copyout, killed, procstate_ZOMBIE, sleep};
+    use crate::sys::{copyout, killed, sleep};
 
     let p = unsafe { myproc().as_mut().unwrap() };
 

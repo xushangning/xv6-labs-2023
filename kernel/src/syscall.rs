@@ -6,7 +6,6 @@ mod proc;
 
 // Prototypes for the functions that handle system calls.
 unsafe extern "C" {
-    fn sys_exit() -> u64;
     fn sys_pipe() -> u64;
     fn sys_read() -> u64;
     fn sys_kill() -> u64;
@@ -32,7 +31,7 @@ unsafe extern "C" {
 static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     None,
     Some(proc::fork),
-    Some(sys_exit),
+    Some(proc::exit),
     Some(proc::wait),
     Some(sys_pipe),
     Some(sys_read),
