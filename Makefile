@@ -21,6 +21,7 @@ OBJS = \
   $K/swtch.o \
   $K/src/trampoline.rs \
   $K/trap.o \
+  $K/src/trap.rs \
   $K/src/syscall.rs \
   $K/syscall.o \
   $K/sysproc.o \

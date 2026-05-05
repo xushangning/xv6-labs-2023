@@ -97,8 +97,7 @@ unsafe extern "C" fn usertrap() {
 }
 
 /// return to user space
-#[unsafe(no_mangle)]
-unsafe extern "C" fn usertrapret() -> ! {
+pub(super) fn usertrapret() -> ! {
     use crate::memlayout::TRAMPOLINE;
 
     let p = unsafe { myproc().as_mut().unwrap() };

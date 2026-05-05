@@ -1,7 +1,7 @@
 use core::{
     ffi::c_int,
     ptr,
-    sync::atomic::{AtomicI32, Ordering},
+    sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 use crate::{
@@ -15,8 +15,6 @@ unsafe extern "C" {
     static mut initproc: *mut proc_;
 
     static mut wait_lock: spinlock;
-
-    fn forkret();
 }
 
 fn allocpid() -> c_int {
@@ -206,4 +204,28 @@ pub(super) fn fork() -> c_int {
     }
 
     pid
+}
+
+/// A fork child's very first scheduling by scheduler()
+/// will swtch to forkret.
+extern "C" fn forkret() {
+    static FIRST: AtomicBool = AtomicBool::new(true);
+
+    // Still holding p->lock from scheduler.
+    unsafe {
+        release(&mut (*crate::sys::myproc()).lock);
+    }
+
+    if FIRST.load(Ordering::Relaxed) {
+        // File system initialization must be run in the context of a
+        // regular process (e.g., because it calls sleep), and thus cannot
+        // be run from main().
+        unsafe {
+            crate::sys::fsinit(crate::sys::ROOTDEV.cast_signed());
+        }
+
+        FIRST.store(false, Ordering::Relaxed);
+    }
+
+    crate::trap::usertrapret();
 }
