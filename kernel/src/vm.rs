@@ -1,6 +1,7 @@
+use alloc::boxed::Box;
 use core::ops::Range;
 
-use crate::riscv::PGSIZE;
+use crate::{kalloc::Page, riscv::PGSIZE};
 
 #[repr(transparent)]
 pub struct PageTable(PageTableLevel);
@@ -14,7 +15,7 @@ impl PageTable {
     /// va and size MUST be page-aligned.
     /// Returns 0 on success, -1 if walk() couldn't
     /// allocate a needed page-table page.
-    fn insert(&mut self, va: Range<usize>, mut pa: *const u8, perm: u64) -> Result<(), ()> {
+    fn insert(&mut self, va: Range<usize>, mut pa: *const Page, perm: u64) -> Result<(), ()> {
         use crate::sys::PTE_V;
 
         if va.start % PGSIZE != 0 {
@@ -38,7 +39,7 @@ impl PageTable {
             }
             *pte = crate::riscv::pa2pte(pa) as u64 | perm | PTE_V as u64;
             unsafe {
-                pa = pa.add(PGSIZE);
+                pa = pa.add(1);
             }
         }
         Ok(())
@@ -55,11 +56,11 @@ pub(super) fn uvmfirst(pagetable: &mut PageTable, src: &[u8]) {
         panic!("uvmfirst: more than a page");
     }
     unsafe {
-        let mem = crate::sys::kalloc().cast::<u8>();
-        mem.write_bytes(0, PGSIZE);
+        let mem = Box::leak(Box::<Page>::new_zeroed().assume_init());
         pagetable
             .insert(0..PGSIZE, mem, (PTE_W | PTE_R | PTE_X | PTE_U).into())
             .unwrap();
-        mem.copy_from_nonoverlapping(src.as_ptr(), src.len());
+        mem.as_mut_ptr()
+            .copy_from_nonoverlapping(src.as_ptr(), src.len());
     }
 }

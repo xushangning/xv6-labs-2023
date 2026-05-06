@@ -1,5 +1,7 @@
 use riscv::register::satp::{self, Satp};
 
+use crate::kalloc::Page;
+
 pub(crate) fn make_satp(pagetable: usize) -> Satp {
     let mut ret = Satp::from_bits(0);
     ret.set_ppn(pagetable >> PGSHIFT);
@@ -53,7 +55,7 @@ pub(crate) const PGSIZE: usize = 4096;
 pub(crate) const PGSHIFT: usize = 12;
 
 /// shift a physical address to the right place for a PTE.
-pub(crate) fn pa2pte(pa: *const u8) -> usize {
+pub(crate) fn pa2pte(pa: *const Page) -> usize {
     (pa.expose_provenance() >> PGSHIFT) << 10
 }
 
