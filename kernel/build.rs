@@ -45,6 +45,8 @@ fn main() {
         .use_core()
         .blocklist_type("proc_")
         .raw_line("type proc_ = crate::proc::Proc;")
+        .blocklist_type("pagetable_t")
+        .raw_line("pub type pagetable_t = *mut crate::vm::PageTable;")
         .generate()
         .expect("Unable to generate bindings");
 
