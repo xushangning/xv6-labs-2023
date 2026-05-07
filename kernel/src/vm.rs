@@ -33,7 +33,7 @@ impl Pte {
 
 bitflags! {
     #[derive(Copy, Clone)]
-    struct PteFlags: usize {
+    pub(super) struct PteFlags: usize {
         /// valid
         const V = 1;
         const R = 1 << 1;
@@ -53,7 +53,12 @@ impl PageTable {
     /// va and size MUST be page-aligned.
     /// Returns 0 on success, -1 if walk() couldn't
     /// allocate a needed page-table page.
-    fn insert(&mut self, va: Range<usize>, mut pa: *const Page, perm: PteFlags) -> Result<(), ()> {
+    pub(super) fn insert(
+        &mut self,
+        va: Range<usize>,
+        mut pa: *const Page,
+        perm: PteFlags,
+    ) -> Result<(), ()> {
         if va.start % PGSIZE != 0 {
             panic!("mappages: va not aligned");
         }

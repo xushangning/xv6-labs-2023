@@ -7,12 +7,13 @@ use core::{
 };
 
 use crate::{
+    println,
     riscv::PGSIZE,
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
         safestrcpy, spinlock, wakeup,
     },
-    vm::PageTable,
+    vm::{PageTable, PteFlags},
 };
 
 #[repr(C)]
@@ -80,12 +81,12 @@ fn allocproc() -> *mut Proc {
                 }
 
                 // An empty user page table.
-                let Some(pt) = NonNull::new(crate::sys::proc_pagetable(p)) else {
+                let Ok(pt) = proc_pagetable(p) else {
                     ptr::drop_in_place(p);
                     release(&mut p.lock);
                     return ptr::null_mut();
                 };
-                p.pagetable = Some(Box::from_non_null(pt));
+                p.pagetable = Some(pt);
 
                 // Set up new context to start executing at forkret,
                 // which returns to user space.
@@ -124,6 +125,55 @@ impl Drop for Proc {
         self.xstate = 0;
         self.state = procstate_UNUSED;
     }
+}
+
+/// Create a user page table for a given process, with no user memory,
+/// but with trampoline and trapframe pages.
+fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
+    use crate::{
+        memlayout::{TRAMPOLINE, TRAPFRAME},
+        sys::{uvmcreate, uvmfree, uvmunmap},
+    };
+
+    // An empty page table.
+    let mut pagetable = unsafe { Box::from_non_null(NonNull::new(uvmcreate()).ok_or(())?) };
+
+    // map the trampoline code (for system call return)
+    // at the highest user virtual address.
+    // only the supervisor uses it, on the way
+    // to/from user space, so not PTE_U.
+    if pagetable
+        .insert(
+            TRAMPOLINE..TRAMPOLINE + PGSIZE,
+            crate::trampoline::trampoline as *const _,
+            PteFlags::R | PteFlags::X,
+        )
+        .is_err()
+    {
+        unsafe {
+            uvmfree(Box::into_raw(pagetable), 0);
+        }
+        return Err(());
+    }
+
+    // map the trapframe page just below the trampoline page, for
+    // trampoline.S.
+    if pagetable
+        .insert(
+            TRAPFRAME..TRAPFRAME + PGSIZE,
+            p.trapframe.as_ref().unwrap().as_ptr().cast(),
+            PteFlags::R | PteFlags::W,
+        )
+        .is_err()
+    {
+        unsafe {
+            uvmunmap(pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
+            uvmfree(Box::into_raw(pagetable), 0);
+        }
+        return Err(());
+    }
+
+    Ok(pagetable)
 }
 
 /// Set up first user process.
