@@ -1,16 +1,12 @@
 use alloc::{alloc::AllocError, boxed::Box};
-use core::ops::Range;
+use core::{mem, ops::Range};
 
 use bitflags::bitflags;
 
 use crate::{
     kalloc::Page,
-    riscv::{PGSIZE, pa2pte, pgroundup},
+    riscv::{PGSIZE, pa2pte, pgroundup, pte2pa},
 };
-
-unsafe extern "C" {
-    fn freewalk(pagetable: *mut PageTable);
-}
 
 #[repr(transparent)]
 struct Pte(usize);
@@ -32,6 +28,10 @@ impl Pte {
 
     fn valid(&self) -> bool {
         self.flags().intersects(PteFlags::V)
+    }
+
+    fn pa(&self) -> *const Page {
+        pte2pa(self.0)
     }
 }
 
@@ -117,11 +117,31 @@ pub(super) fn uvmfirst(pagetable: &mut PageTable, src: &[u8]) {
     }
 }
 
+impl Drop for PageTableLevel {
+    /// Recursively free page-table pages.
+    /// All leaf mappings must already have been removed.
+    fn drop(&mut self) {
+        // there are 2^9 = 512 PTEs in a page table.
+        for pte in &mut self.0 {
+            if pte.valid() {
+                if pte
+                    .flags()
+                    .intersects(PteFlags::R | PteFlags::W | PteFlags::X)
+                {
+                    panic!("freewalk: leaf");
+                }
+                // this PTE points to a lower-level page table.
+                mem::drop(unsafe { Box::from_raw(pte.pa().cast::<PageTableLevel>().cast_mut()) });
+            }
+        }
+    }
+}
+
 /// Free user memory pages,
 /// then free page-table pages.
 pub(super) fn uvmfree(mut pagetable: Box<PageTable>, sz: usize) {
-    unsafe {
-        if sz > 0 {
+    if sz > 0 {
+        unsafe {
             crate::sys::uvmunmap(
                 pagetable.as_mut(),
                 0,
@@ -129,6 +149,5 @@ pub(super) fn uvmfree(mut pagetable: Box<PageTable>, sz: usize) {
                 1,
             );
         }
-        freewalk(Box::into_raw(pagetable));
     }
 }

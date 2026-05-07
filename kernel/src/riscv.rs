@@ -1,3 +1,5 @@
+use core::ptr;
+
 use riscv::register::satp::{self, Satp};
 
 use crate::kalloc::Page;
@@ -61,6 +63,10 @@ pub(crate) const fn pgroundup(sz: usize) -> usize {
 /// shift a physical address to the right place for a PTE.
 pub(crate) fn pa2pte(pa: *const Page) -> usize {
     (pa.expose_provenance() >> PGSHIFT) << 10
+}
+
+pub(crate) fn pte2pa(pte: usize) -> *const Page {
+    ptr::with_exposed_provenance((pte >> 10) << PGSHIFT)
 }
 
 /// one beyond the highest possible virtual address.
