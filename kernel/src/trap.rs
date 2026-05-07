@@ -12,12 +12,12 @@ use crate::{
     riscv::intr,
     spinlock::Mutex,
     sys::{exit, killed, myproc, yield_},
+    trampoline::trampoline,
 };
 
 pub(super) static TICKS: Mutex<c_uint> = Mutex::new(c"time", 0);
 
 unsafe extern "C" {
-    fn trampoline();
     fn uservec();
     fn userret();
 
