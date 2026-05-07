@@ -5,8 +5,12 @@ use bitflags::bitflags;
 
 use crate::{
     kalloc::Page,
-    riscv::{PGSIZE, pa2pte},
+    riscv::{PGSIZE, pa2pte, pgroundup},
 };
+
+unsafe extern "C" {
+    fn freewalk(pagetable: *mut PageTable);
+}
 
 #[repr(transparent)]
 struct Pte(usize);
@@ -110,5 +114,21 @@ pub(super) fn uvmfirst(pagetable: &mut PageTable, src: &[u8]) {
             .unwrap();
         mem.as_mut_ptr()
             .copy_from_nonoverlapping(src.as_ptr(), src.len());
+    }
+}
+
+/// Free user memory pages,
+/// then free page-table pages.
+pub(super) fn uvmfree(mut pagetable: Box<PageTable>, sz: usize) {
+    unsafe {
+        if sz > 0 {
+            crate::sys::uvmunmap(
+                pagetable.as_mut(),
+                0,
+                (pgroundup(sz) / PGSIZE).try_into().unwrap(),
+                1,
+            );
+        }
+        freewalk(Box::into_raw(pagetable));
     }
 }

@@ -11,9 +11,9 @@ use crate::{
     riscv::PGSIZE,
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
-        safestrcpy, spinlock, uvmfree, uvmunmap, wakeup,
+        safestrcpy, spinlock, uvmunmap, wakeup,
     },
-    vm::{PageTable, PteFlags},
+    vm::{PageTable, PteFlags, uvmfree},
 };
 
 #[repr(C)]
@@ -112,7 +112,7 @@ impl Drop for Proc {
     fn drop(&mut self) {
         self.trapframe = None;
         if let Some(pt) = self.pagetable.take() {
-            proc_freepagetable(pt, self.sz);
+            proc_freepagetable(pt, self.sz.try_into().unwrap());
         }
         self.sz = 0;
         self.pid = 0;
@@ -143,9 +143,7 @@ fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
         )
         .is_err()
     {
-        unsafe {
-            uvmfree(Box::into_raw(pagetable), 0);
-        }
+        uvmfree(pagetable, 0);
         return Err(());
     }
 
@@ -161,8 +159,8 @@ fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
     {
         unsafe {
             uvmunmap(pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
-            uvmfree(Box::into_raw(pagetable), 0);
         }
+        uvmfree(pagetable, 0);
         return Err(());
     }
 
@@ -171,11 +169,11 @@ fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
 
 /// Free a process's page table, and free the
 /// physical memory it refers to.
-fn proc_freepagetable(mut pagetable: Box<PageTable>, sz: u64) {
+fn proc_freepagetable(mut pagetable: Box<PageTable>, sz: usize) {
     unsafe {
         uvmunmap(pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
         uvmunmap(pagetable.as_mut(), TRAPFRAME.try_into().unwrap(), 1, 0);
-        uvmfree(Box::into_raw(pagetable), sz);
+        uvmfree(pagetable, sz);
     }
 }
 
