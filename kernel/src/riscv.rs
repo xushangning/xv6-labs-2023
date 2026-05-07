@@ -56,6 +56,10 @@ pub(crate) const PGSIZE: usize = 4096;
 /// bits of offset within a page
 pub(crate) const PGSHIFT: usize = 12;
 
+pub(crate) const fn pgroundup(sz: usize) -> usize {
+    (sz + PGSIZE - 1) & !(PGSIZE - 1)
+}
+
 /// shift a physical address to the right place for a PTE.
 pub(crate) fn pa2pte(pa: *const Page) -> usize {
     (pa.expose_provenance() >> PGSHIFT) << 10

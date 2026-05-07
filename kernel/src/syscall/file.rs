@@ -5,7 +5,7 @@
 use core::{
     ffi::{c_char, c_int},
     mem::MaybeUninit,
-    ptr,
+    ptr, slice,
 };
 
 use alloc::boxed::Box;
@@ -62,39 +62,37 @@ pub(super) unsafe extern "C" fn read() -> u64 {
 pub(super) unsafe extern "C" fn exec() -> u64 {
     use crate::param::MAXPATH;
 
-    let mut uargv = MaybeUninit::<*const u64>::uninit();
+    let mut uargv = {
+        let mut uargv = MaybeUninit::<*const u64>::uninit();
+        unsafe {
+            argaddr(1, uargv.as_mut_ptr().cast());
+            uargv.assume_init()
+        }
+    };
 
-    unsafe { argaddr(1, uargv.as_mut_ptr().cast()) };
     let mut path = MaybeUninit::<[c_char; MAXPATH]>::uninit();
     if unsafe { argstr(0, path.as_mut_ptr().cast(), MAXPATH.try_into().unwrap()) } < 0 {
         return (-1i64).cast_unsigned();
     }
-    let mut argv = heapless::Vec::<Option<Box<MaybeUninit<Page>>>, { crate::param::MAXARG }>::new();
-    for i in 0..argv.capacity() {
-        let mut uarg = MaybeUninit::uninit();
-        if unsafe {
-            fetchaddr(
-                uargv.assume_init().add(i).addr().try_into().unwrap(),
-                uarg.as_mut_ptr(),
-            )
-        } < 0
-        {
-            return (-1i64).cast_unsigned();
-        }
-        let uarg = unsafe { uarg.assume_init() };
-        if uarg == 0 {
-            unsafe {
-                argv.push_unchecked(None);
+    let mut argv = heapless::Vec::<Box<MaybeUninit<Page>>, { crate::param::MAXARG }>::new();
+    for _ in 0..argv.capacity() {
+        let uarg = {
+            let mut uarg = MaybeUninit::uninit();
+            if unsafe { fetchaddr(uargv.addr().try_into().unwrap(), uarg.as_mut_ptr()) } < 0 {
+                return (-1i64).cast_unsigned();
             }
+            unsafe { uarg.assume_init() }
+        };
+        if uarg == 0 {
             break;
         }
-        let Ok(mut a) = Box::<Page>::try_new_uninit() else {
+        let Ok(mut arg) = Box::<Page>::try_new_uninit() else {
             return (-1i64).cast_unsigned();
         };
         if unsafe {
             fetchstr(
                 uarg,
-                a.as_mut_ptr().cast(),
+                arg.as_mut_ptr().cast(),
                 crate::riscv::PGSIZE.try_into().unwrap(),
             )
         } < 0
@@ -102,13 +100,15 @@ pub(super) unsafe extern "C" fn exec() -> u64 {
             return (-1i64).cast_unsigned();
         }
         unsafe {
-            argv.push_unchecked(Some(a));
+            argv.push_unchecked(arg);
         };
+        uargv = unsafe { uargv.add(1) };
     }
 
-    unsafe {
-        crate::sys::exec(path.as_mut_ptr().cast(), argv.as_mut_ptr().cast())
-            .cast_unsigned()
-            .into()
+    match crate::exec::exec(path.as_ptr().cast(), unsafe {
+        slice::from_raw_parts(argv.as_ptr().cast(), argv.len())
+    }) {
+        Ok(ret) => ret.try_into().unwrap(),
+        Err(_) => (-1i64).cast_unsigned(),
     }
 }

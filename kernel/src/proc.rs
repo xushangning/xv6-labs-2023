@@ -164,7 +164,7 @@ fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
 
 /// Free a process's page table, and free the
 /// physical memory it refers to.
-fn proc_freepagetable(mut vm: Vm) {
+pub(super) fn proc_freepagetable(mut vm: Vm) {
     unsafe {
         uvmunmap(vm.pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
         uvmunmap(vm.pagetable.as_mut(), TRAPFRAME.try_into().unwrap(), 1, 0);
@@ -377,7 +377,7 @@ pub(super) fn exit(status: c_int) -> ! {
 /// Wait for a child process to exit and return its pid.
 /// Return -1 if this process has no children.
 pub(super) fn wait(addr: u64) -> c_int {
-    use crate::sys::{copyout, killed, sleep};
+    use crate::sys::{killed, sleep};
 
     let p = unsafe { myproc().as_mut().unwrap() };
 
@@ -397,12 +397,12 @@ pub(super) fn wait(addr: u64) -> c_int {
                         // Found one.
                         let pid = pp.pid;
                         if addr != 0
-                            && copyout(
+                            && crate::vm::copyout(
                                 p.pagetable.as_mut().unwrap().as_mut(),
-                                addr,
-                                (&raw mut pp.xstate).cast(),
-                                core::mem::size_of_val(&pp.xstate).try_into().unwrap(),
-                            ) < 0
+                                addr.try_into().unwrap(),
+                                bytemuck::bytes_of(&pp.xstate),
+                            )
+                            .is_err()
                         {
                             release(&mut pp.lock);
                             release(&raw mut wait_lock);

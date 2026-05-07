@@ -14,9 +14,16 @@ bench = false
 
 [dependencies]
 bitflags = "2.11.1"
+bytemuck = "1.25.0"
+goblin = { version = "0.10.5", features = ["elf64"], default-features = false }
 heapless = "0.9.3"
 riscv = "0.15.0"
 
 [build-dependencies]
 bindgen = "0.72.1"
 cc = "1.2.45"
+
+[profile.dev]
+# Raise optimization level to reduce stack usage and avoid stack overflow in
+# the kernel's exec syscall handler.
+opt-level = 1

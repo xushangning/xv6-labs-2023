@@ -32,7 +32,7 @@ OBJS = \
   $K/file.o \
   $K/src/file.rs \
   $K/pipe.o \
-  $K/exec.o \
+  $K/src/exec.rs \
   $K/sysfile.o \
   $K/src/syscall/file.rs \
   $K/src/kernelvec.rs \

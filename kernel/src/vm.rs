@@ -1,6 +1,7 @@
 use alloc::{alloc::AllocError, boxed::Box};
 use core::{
     mem::{self, ManuallyDrop},
+    num::NonZero,
     ops::{Deref, DerefMut, Range},
     ptr,
 };
@@ -190,6 +191,27 @@ pub(super) fn uvmfirst(pagetable: &mut PageTable, src: &[u8]) {
     }
 }
 
+/// Allocate PTEs and physical memory to grow process from oldsz to
+/// newsz, which need not be page aligned.  Returns new size or 0 on error.
+pub(super) unsafe fn uvmalloc(
+    vm: &mut Vm,
+    newsz: usize,
+    xperm: PteFlags,
+) -> Result<NonZero<usize>, ()> {
+    NonZero::new(
+        usize::try_from(unsafe {
+            crate::sys::uvmalloc(
+                vm.pagetable.as_mut(),
+                vm.sz.try_into().unwrap(),
+                newsz.try_into().unwrap(),
+                xperm.bits().try_into().unwrap(),
+            )
+        })
+        .unwrap(),
+    )
+    .ok_or(())
+}
+
 impl Drop for PageTableLevel {
     /// Recursively free page-table pages.
     /// All leaf mappings must already have been removed.
@@ -229,6 +251,25 @@ impl Drop for Vm {
             self.pagetable.remove(0..self.sz, true);
         }
     }
+}
+
+/// Copy from kernel to user.
+/// Copy len bytes from src to virtual address dstva in a given page table.
+/// Return 0 on success, -1 on error.
+pub(super) unsafe fn copyout(
+    pagetable: &mut PageTable,
+    dstva: usize,
+    src: &[u8],
+) -> Result<(), ()> {
+    let ret = unsafe {
+        crate::sys::copyout(
+            pagetable,
+            dstva.try_into().unwrap(),
+            src.as_ptr().cast_mut(),
+            src.len().try_into().unwrap(),
+        )
+    };
+    if ret >= 0 { Ok(()) } else { Err(()) }
 }
 
 impl Deref for PageTableLevel {

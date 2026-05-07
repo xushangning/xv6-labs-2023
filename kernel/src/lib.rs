@@ -1,6 +1,8 @@
 #![no_std]
 #![feature(allocator_api)]
 #![feature(arbitrary_self_types_pointers)]
+#![feature(box_vec_non_null)]
+#![feature(drop_guard)]
 
 extern crate alloc;
 
@@ -10,7 +12,9 @@ use core::{
 };
 
 mod console;
+mod exec;
 mod file;
+mod fs;
 mod kalloc;
 mod kernelvec;
 mod memlayout;

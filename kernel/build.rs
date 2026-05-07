@@ -16,7 +16,6 @@ fn main() {
             "sleeplock.c",
             "file.c",
             "pipe.c",
-            "exec.c",
             "sysfile.c",
             "plic.c",
             "virtio_disk.c",
