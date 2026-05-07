@@ -139,7 +139,8 @@ pub(super) fn usertrapret() -> ! {
 
     unsafe { sepc::write(trapframe.epc.try_into().unwrap()) };
 
-    let satp = crate::riscv::make_satp(p.pagetable.addr());
+    let satp =
+        crate::riscv::make_satp(core::ptr::from_ref(p.pagetable.as_ref().unwrap().as_ref()).addr());
 
     let trampoline_userret =
         TRAMPOLINE + ((userret as *const ()).addr() - (trampoline as *const ()).addr());

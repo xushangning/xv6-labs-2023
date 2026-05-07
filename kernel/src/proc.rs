@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
     mem::MaybeUninit,
-    ptr,
+    ptr::{self, NonNull},
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
@@ -12,6 +12,7 @@ use crate::{
         acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
         safestrcpy, spinlock, wakeup,
     },
+    vm::PageTable,
 };
 
 #[repr(C)]
@@ -25,7 +26,7 @@ pub(super) struct Proc {
     pub parent: *mut Proc,
     pub kstack: u64,
     pub sz: u64,
-    pub pagetable: crate::sys::pagetable_t,
+    pub pagetable: Option<Box<PageTable>>,
     pub trapframe: Option<Box<MaybeUninit<crate::sys::trapframe>>>,
     pub context: crate::sys::context,
     pub ofile: [*mut crate::sys::file; 16],
@@ -79,12 +80,12 @@ fn allocproc() -> *mut Proc {
                 }
 
                 // An empty user page table.
-                p.pagetable = crate::sys::proc_pagetable(p);
-                if p.pagetable.is_null() {
+                let Some(pt) = NonNull::new(crate::sys::proc_pagetable(p)) else {
                     ptr::drop_in_place(p);
                     release(&mut p.lock);
                     return ptr::null_mut();
-                }
+                };
+                p.pagetable = Some(Box::from_non_null(pt));
 
                 // Set up new context to start executing at forkret,
                 // which returns to user space.
@@ -109,12 +110,11 @@ fn allocproc() -> *mut Proc {
 impl Drop for Proc {
     fn drop(&mut self) {
         self.trapframe = None;
-        if !self.pagetable.is_null() {
+        if let Some(pt) = self.pagetable.take() {
             unsafe {
-                crate::sys::proc_freepagetable(self.pagetable, self.sz);
+                crate::sys::proc_freepagetable(Box::into_raw(pt).cast(), self.sz);
             }
         }
-        self.pagetable = ptr::null_mut();
         self.sz = 0;
         self.pid = 0;
         self.parent = ptr::null_mut();
@@ -176,7 +176,7 @@ pub(super) fn growproc(n: c_int) -> c_int {
     if n > 0 {
         sz = unsafe {
             uvmalloc(
-                p.pagetable,
+                p.pagetable.as_mut().unwrap().as_mut(),
                 sz,
                 sz.wrapping_add(n as u64),
                 PTE_W.cast_signed(),
@@ -186,7 +186,13 @@ pub(super) fn growproc(n: c_int) -> c_int {
             return -1;
         }
     } else if n < 0 {
-        sz = unsafe { uvmdealloc(p.pagetable, sz, sz.wrapping_sub((-n) as u64)) };
+        sz = unsafe {
+            uvmdealloc(
+                p.pagetable.as_mut().unwrap().as_mut(),
+                sz,
+                sz.wrapping_sub((-n) as u64),
+            )
+        };
     }
     p.sz = sz;
     0
@@ -205,7 +211,14 @@ pub(super) fn fork() -> c_int {
     };
 
     // Copy user memory from parent to child.
-    if unsafe { uvmcopy(p.pagetable, np.pagetable, p.sz) } < 0 {
+    if unsafe {
+        uvmcopy(
+            p.pagetable.as_mut().unwrap().as_mut(),
+            np.pagetable.as_mut().unwrap().as_mut(),
+            p.sz,
+        )
+    } < 0
+    {
         unsafe {
             ptr::drop_in_place(np);
             release(&mut np.lock);
@@ -340,7 +353,7 @@ pub(super) fn wait(addr: u64) -> c_int {
                         let pid = pp.pid;
                         if addr != 0
                             && copyout(
-                                p.pagetable,
+                                p.pagetable.as_mut().unwrap().as_mut(),
                                 addr,
                                 (&raw mut pp.xstate).cast(),
                                 core::mem::size_of_val(&pp.xstate).try_into().unwrap(),
