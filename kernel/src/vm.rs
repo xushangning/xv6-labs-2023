@@ -9,7 +9,7 @@ use bitflags::bitflags;
 
 use crate::{
     kalloc::Page,
-    riscv::{PGSIZE, pa2pte, pgroundup, pte2pa},
+    riscv::{PGSIZE, pa2pte, pte2pa},
 };
 
 #[repr(transparent)]
@@ -118,7 +118,7 @@ impl PageTable {
             panic!("mappages: size");
         }
 
-        for a in (va.start..va.end).step_by(PGSIZE) {
+        for a in va.step_by(PGSIZE) {
             let pte = self.get_or_choose_insert(a, true).ok_or(())?;
             if pte.valid() {
                 panic!("mappages: remap");
@@ -129,6 +129,33 @@ impl PageTable {
             }
         }
         Ok(())
+    }
+
+    /// Remove npages of mappings starting from va. va must be
+    /// page-aligned. The mappings must exist.
+    /// Optionally free the physical memory.
+    pub(super) fn remove(&mut self, va: Range<usize>, do_free: bool) {
+        if va.start % PGSIZE != 0 {
+            panic!("uvmunmap: not aligned");
+        }
+
+        for a in va.step_by(PGSIZE) {
+            let Some(pte) = self.get_or_choose_insert(a, false) else {
+                panic!("uvmunmap: walk")
+            };
+            if !pte.valid() {
+                panic!("uvmunmap: not mapped");
+            }
+            if PteFlags::V.contains(pte.flags()) {
+                panic!("uvmunmap: not a leaf");
+            }
+            if do_free {
+                unsafe {
+                    mem::drop(Box::from_raw(pte.pa().cast::<Page>().cast_mut()));
+                }
+            }
+            *pte = Pte(0);
+        }
     }
 }
 
@@ -181,14 +208,7 @@ impl Drop for PageTableLevel {
 /// then free page-table pages.
 pub(super) fn uvmfree(mut pagetable: Box<PageTable>, sz: usize) {
     if sz > 0 {
-        unsafe {
-            crate::sys::uvmunmap(
-                pagetable.as_mut(),
-                0,
-                (pgroundup(sz) / PGSIZE).try_into().unwrap(),
-                1,
-            );
-        }
+        pagetable.remove(0..sz, true);
     }
 }
 
