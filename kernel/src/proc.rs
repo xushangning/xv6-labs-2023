@@ -2,12 +2,11 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
     mem::MaybeUninit,
-    ptr::{self, NonNull},
+    ptr,
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 use crate::{
-    println,
     riscv::PGSIZE,
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
@@ -132,11 +131,11 @@ impl Drop for Proc {
 fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
     use crate::{
         memlayout::{TRAMPOLINE, TRAPFRAME},
-        sys::{uvmcreate, uvmfree, uvmunmap},
+        sys::{uvmfree, uvmunmap},
     };
 
     // An empty page table.
-    let mut pagetable = unsafe { Box::from_non_null(NonNull::new(uvmcreate()).ok_or(())?) };
+    let mut pagetable = crate::vm::uvmcreate().map_err(|_| ())?;
 
     // map the trampoline code (for system call return)
     // at the highest user virtual address.

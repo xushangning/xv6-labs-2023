@@ -1,6 +1,5 @@
 #![no_std]
 #![feature(allocator_api)]
-#![feature(box_vec_non_null)]
 
 extern crate alloc;
 

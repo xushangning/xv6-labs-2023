@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{alloc::AllocError, boxed::Box};
 use core::ops::Range;
 
 use bitflags::bitflags;
@@ -86,6 +86,10 @@ impl PageTable {
         }
         Ok(())
     }
+}
+
+pub(super) fn uvmcreate() -> Result<Box<PageTable>, AllocError> {
+    Box::try_new_zeroed().map(|b| unsafe { b.assume_init() })
 }
 
 /// Load the user initcode into address 0 of pagetable,
