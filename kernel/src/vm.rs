@@ -1,5 +1,9 @@
 use alloc::{alloc::AllocError, boxed::Box};
-use core::{mem, ops::Range};
+use core::{
+    mem,
+    ops::{Deref, DerefMut, Range},
+    ptr,
+};
 
 use bitflags::bitflags;
 
@@ -52,6 +56,47 @@ bitflags! {
 }
 
 impl PageTable {
+    /// Return the address of the PTE in page table pagetable
+    /// that corresponds to virtual address va.  If insert!=0,
+    /// create any required page-table pages.
+    ///
+    /// The risc-v Sv39 scheme has three levels of page-table
+    /// pages. A page-table page contains 512 64-bit PTEs.
+    /// A 64-bit virtual address is split into five fields:
+    ///   39..63 -- must be zero.
+    ///   30..38 -- 9 bits of level-2 index.
+    ///   21..29 -- 9 bits of level-1 index.
+    ///   12..20 -- 9 bits of level-0 index.
+    ///    0..11 -- 12 bits of byte offset within the page.
+    fn get_or_choose_insert(&mut self, va: usize, insert: bool) -> Option<&mut Pte> {
+        use crate::riscv::{MAXVA, px};
+
+        if va >= MAXVA {
+            panic!("walk");
+        }
+
+        let mut pagetable = &mut self.0;
+        for level in (1..=2).rev() {
+            let pte = &mut pagetable[px(level, va)];
+            if pte.valid() {
+                pagetable = unsafe {
+                    pte.pa()
+                        .cast::<PageTableLevel>()
+                        .cast_mut()
+                        .as_mut()
+                        .unwrap()
+                };
+            } else {
+                if !insert {
+                    return None;
+                }
+                pagetable = Box::leak(unsafe { Box::try_new_zeroed().ok()?.assume_init() });
+                *pte = Pte::new(ptr::from_mut(pagetable).cast(), PteFlags::empty());
+            }
+        }
+        Some(&mut pagetable[px(0, va)])
+    }
+
     /// Create PTEs for virtual addresses starting at va that refer to
     /// physical addresses starting at pa.
     /// va and size MUST be page-aligned.
@@ -74,12 +119,7 @@ impl PageTable {
         }
 
         for a in (va.start..va.end).step_by(PGSIZE) {
-            let pte = unsafe {
-                crate::sys::walk(self.0.0.as_mut_ptr().cast(), a.try_into().unwrap(), 1)
-                    .cast::<Pte>()
-                    .as_mut()
-                    .ok_or(())?
-            };
+            let pte = self.get_or_choose_insert(a, true).ok_or(())?;
             if pte.valid() {
                 panic!("mappages: remap");
             }
@@ -149,5 +189,19 @@ pub(super) fn uvmfree(mut pagetable: Box<PageTable>, sz: usize) {
                 1,
             );
         }
+    }
+}
+
+impl Deref for PageTableLevel {
+    type Target = [Pte; 512];
+
+    fn deref(&self) -> &[Pte; 512] {
+        &self.0
+    }
+}
+
+impl DerefMut for PageTableLevel {
+    fn deref_mut(&mut self) -> &mut [Pte; 512] {
+        &mut self.0
     }
 }
