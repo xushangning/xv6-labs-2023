@@ -7,10 +7,11 @@ use core::{
 };
 
 use crate::{
+    memlayout::{TRAMPOLINE, TRAPFRAME},
     riscv::PGSIZE,
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
-        safestrcpy, spinlock, wakeup,
+        safestrcpy, spinlock, uvmfree, uvmunmap, wakeup,
     },
     vm::{PageTable, PteFlags},
 };
@@ -111,9 +112,7 @@ impl Drop for Proc {
     fn drop(&mut self) {
         self.trapframe = None;
         if let Some(pt) = self.pagetable.take() {
-            unsafe {
-                crate::sys::proc_freepagetable(Box::into_raw(pt).cast(), self.sz);
-            }
+            proc_freepagetable(pt, self.sz);
         }
         self.sz = 0;
         self.pid = 0;
@@ -129,11 +128,6 @@ impl Drop for Proc {
 /// Create a user page table for a given process, with no user memory,
 /// but with trampoline and trapframe pages.
 fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
-    use crate::{
-        memlayout::{TRAMPOLINE, TRAPFRAME},
-        sys::{uvmfree, uvmunmap},
-    };
-
     // An empty page table.
     let mut pagetable = crate::vm::uvmcreate().map_err(|_| ())?;
 
@@ -173,6 +167,16 @@ fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
     }
 
     Ok(pagetable)
+}
+
+/// Free a process's page table, and free the
+/// physical memory it refers to.
+fn proc_freepagetable(mut pagetable: Box<PageTable>, sz: u64) {
+    unsafe {
+        uvmunmap(pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
+        uvmunmap(pagetable.as_mut(), TRAPFRAME.try_into().unwrap(), 1, 0);
+        uvmfree(Box::into_raw(pagetable), sz);
+    }
 }
 
 /// Set up first user process.
