@@ -41,6 +41,13 @@ unsafe extern "C" {
     static mut wait_lock: spinlock;
 }
 
+/// Must be called with interrupts disabled,
+/// to prevent race with process being moved
+/// to a different CPU.
+pub(super) unsafe fn cpuid() -> usize {
+    unsafe { crate::riscv::tp::read() }
+}
+
 fn allocpid() -> c_int {
     static NEXT_PID: AtomicI32 = AtomicI32::new(1);
 
@@ -117,13 +124,6 @@ impl Drop for Proc {
         self.xstate = 0;
         self.state = procstate_UNUSED;
     }
-}
-
-/// Must be called with interrupts disabled,
-/// to prevent race with process being moved
-/// to a different CPU.
-pub(super) unsafe fn cpuid() -> usize {
-    unsafe { crate::riscv::tp::read() }
 }
 
 /// Set up first user process.
