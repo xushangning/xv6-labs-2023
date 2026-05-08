@@ -30,9 +30,11 @@ OBJS = \
   $K/log.o \
   $K/sleeplock.o \
   $K/file.o \
+  $K/src/file.rs \
   $K/pipe.o \
   $K/exec.o \
   $K/sysfile.o \
+  $K/src/syscall/file.rs \
   $K/src/kernelvec.rs \
   $K/plic.o \
   $K/virtio_disk.o

@@ -9,6 +9,7 @@ use core::{
 };
 
 mod console;
+mod file;
 mod kalloc;
 mod kernelvec;
 mod memlayout;
