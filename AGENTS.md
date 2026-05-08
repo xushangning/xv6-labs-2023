@@ -22,3 +22,64 @@ make grade
 - When porting code from C to Rust, bring over any original comments, but don't add your own.
 - When migrating a C/assembly file to Rust, add the new `.rs` file to `OBJS` as a dependency marker so Make re-triggers `cargo build` when it changes.
 - DO NOT remove C code that's been migrated to Rust unless absolutely necessary to avoid problems like symbol name collision. This is to allow easier review of the original C code should bugs arise, and to minimize the number of changes in a commit.
+
+## C-to-Rust Function Name Mapping
+
+Notable functions whose names changed completely during migration. Useful when translating call sites from C to Rust, and for showing how xv6 OS implementation maps to Rust concepts.
+
+<table>
+<thead>
+  <tr><th>C Source</th><th>C Function</th><th>Rust Equivalent</th><th>OS Concept</th></tr>
+</thead>
+<tbody>
+  <tr>
+    <td rowspan="4"><code>vm.c</code></td>
+    <td><code>mappages</code></td>
+    <td><code>PageTable::insert</code></td>
+    <td>Map virtual→physical pages</td>
+  </tr>
+  <tr>
+    <td><code>walk</code></td>
+    <td><code>PageTable::get_or_choose_insert</code></td>
+    <td>Page table walk</td>
+  </tr>
+  <tr>
+    <td><code>uvmunmap</code></td>
+    <td><code>PageTable::remove</code></td>
+    <td>Unmap virtual memory region</td>
+  </tr>
+  <tr>
+    <td><code>freewalk</code></td>
+    <td><code>Drop::drop</code> for <code>PageTable</code></td>
+    <td>Recursive page table free</td>
+  </tr>
+  <tr>
+    <td><code>kalloc.c</code></td>
+    <td><code>kalloc</code>, <code>kfree</code></td>
+    <td><code>GlobalAlloc::{alloc,dealloc}</code> on <code>Allocator</code></td>
+    <td>Kernel page allocator</td>
+  </tr>
+  <tr>
+    <td><code>proc.c</code></td>
+    <td><code>freeproc</code></td>
+    <td><code>Drop::drop</code> for <code>proc_</code></td>
+    <td>Release process resources</td>
+  </tr>
+  <tr>
+    <td rowspan="3"><code>spinlock.c</code></td>
+    <td><code>initlock</code></td>
+    <td><code>Mutex::new</code></td>
+    <td>Spinlock initialization</td>
+  </tr>
+  <tr>
+    <td><code>acquire</code></td>
+    <td><code>Mutex::lock</code></td>
+    <td>Spinlock acquire</td>
+  </tr>
+  <tr>
+    <td><code>release</code></td>
+    <td><code>MutexGuard</code> drop (RAII)</td>
+    <td>Explicit unlock</td>
+  </tr>
+</tbody>
+</table>
