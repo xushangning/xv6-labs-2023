@@ -11,8 +11,8 @@ use crate::{
     riscv::PGSIZE,
     spinlock::MutexGuard,
     sys::{
-        acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
-        safestrcpy, spinlock, uvmunmap, wakeup,
+        acquire, myproc, procstate_RUNNABLE, procstate_SLEEPING, procstate_UNUSED,
+        procstate_ZOMBIE, release, safestrcpy, spinlock, uvmunmap, wakeup,
     },
     vm::{PageTable, PteFlags, uvmfree},
 };
@@ -487,7 +487,7 @@ impl<T> Condvar<T> {
 
             // Go to sleep.
             p.chan = self.cast_mut().cast();
-            p.state = crate::sys::procstate_SLEEPING;
+            p.state = procstate_SLEEPING;
 
             // Tidy up.
             crate::sys::sched();
@@ -497,6 +497,24 @@ impl<T> Condvar<T> {
             // Reacquire original lock.
             release(&mut p.lock);
             lk.lock()
+        }
+    }
+
+    /// Wake up all processes sleeping on chan.
+    /// Must be called without any p->lock.
+    pub(super) fn notify_all(&self) {
+        unsafe {
+            for p in &mut *&raw mut proc {
+                if ptr::from_mut(p) != myproc() {
+                    acquire(&mut p.lock);
+                    if p.state == procstate_SLEEPING
+                        && p.chan == ptr::from_ref(self).cast_mut().cast()
+                    {
+                        p.state = procstate_RUNNABLE;
+                    }
+                    release(&mut p.lock);
+                }
+            }
         }
     }
 }

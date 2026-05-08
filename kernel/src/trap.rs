@@ -189,9 +189,7 @@ unsafe extern "C" fn kerneltrap() {
 fn clockintr() {
     let mut ticks = TICKS.lock();
     ticks.0 += 1;
-    unsafe {
-        crate::sys::wakeup((&raw const TICKS).cast_mut().cast());
-    }
+    ticks.notify_all();
 }
 
 /// Check if it's an external interrupt or software interrupt,

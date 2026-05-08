@@ -174,9 +174,7 @@ pub(super) fn intr(mut c: u8) {
             // wake up consoleread() if a whole line (or end-of-file)
             // has arrived.
             cons.w = cons.e;
-            unsafe {
-                crate::sys::wakeup((&raw mut cons.r).cast());
-            }
+            cons.r.notify_all();
         }
     }
 }

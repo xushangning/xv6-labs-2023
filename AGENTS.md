@@ -81,10 +81,15 @@ Notable functions whose names changed completely during migration. Useful when t
     <td>Kernel page allocator</td>
   </tr>
   <tr>
-    <td><code>proc.c</code></td>
+    <td rowspan="2"><code>proc.c</code></td>
     <td><code>freeproc</code></td>
     <td><code>Drop::drop</code> for <code>proc_</code></td>
     <td>Release process resources</td>
+  </tr>
+  <tr>
+    <td><code>sleep</code>, <code>wakeup</code></td>
+    <td><code>Condvar::{wait,notify_all}</code></td>
+    <td>Condition variables</td>
   </tr>
   <tr>
     <td rowspan="3"><code>spinlock.c</code></td>
