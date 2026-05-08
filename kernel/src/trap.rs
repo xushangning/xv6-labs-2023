@@ -9,13 +9,14 @@ use riscv::register::{
 
 use crate::{
     println,
+    proc::Condvar,
     riscv::intr,
     spinlock::Mutex,
     sys::{exit, killed, myproc, yield_},
     trampoline::trampoline,
 };
 
-pub(super) static TICKS: Mutex<c_uint> = Mutex::new(c"time", 0);
+pub(super) static TICKS: Mutex<Condvar<c_uint>> = Mutex::new(c"time", Condvar(0));
 
 unsafe extern "C" {
     fn uservec();
@@ -187,7 +188,7 @@ unsafe extern "C" fn kerneltrap() {
 
 fn clockintr() {
     let mut ticks = TICKS.lock();
-    *ticks += 1;
+    ticks.0 += 1;
     unsafe {
         crate::sys::wakeup((&raw const TICKS).cast_mut().cast());
     }

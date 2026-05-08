@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
-    mem::MaybeUninit,
+    mem::{self, MaybeUninit},
     ptr,
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
@@ -9,6 +9,7 @@ use core::{
 use crate::{
     memlayout::{TRAMPOLINE, TRAPFRAME},
     riscv::PGSIZE,
+    spinlock::MutexGuard,
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_UNUSED, procstate_ZOMBIE, release,
         safestrcpy, spinlock, uvmunmap, wakeup,
@@ -457,6 +458,47 @@ extern "C" fn forkret() {
     }
 
     crate::trap::usertrapret();
+}
+
+#[repr(transparent)]
+pub(super) struct Condvar<T>(pub T);
+
+impl<T> Condvar<T> {
+    pub(super) const fn new(t: T) -> Self {
+        Self(t)
+    }
+
+    /// Atomically release lock and sleep on chan.
+    /// Reacquires lock when awakened.
+    pub(super) fn wait<'a, U>(self: *const Self, guard: MutexGuard<'a, U>) -> MutexGuard<'a, U> {
+        let p = unsafe { myproc().as_mut().unwrap() };
+
+        // Must acquire p->lock in order to
+        // change p->state and then call sched.
+        // Once we hold p->lock, we can be
+        // guaranteed that we won't miss any wakeup
+        // (wakeup locks p->lock),
+        // so it's okay to release lk.
+
+        unsafe {
+            acquire(&mut p.lock); //DOC: sleeplock1
+            let lk = guard.lock;
+            mem::drop(guard);
+
+            // Go to sleep.
+            p.chan = self.cast_mut().cast();
+            p.state = crate::sys::procstate_SLEEPING;
+
+            // Tidy up.
+            crate::sys::sched();
+
+            p.chan = ptr::null_mut();
+
+            // Reacquire original lock.
+            release(&mut p.lock);
+            lk.lock()
+        }
+    }
 }
 
 /// Kill the process with the given pid.

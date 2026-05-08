@@ -12,7 +12,7 @@ use core::{
     mem::MaybeUninit,
 };
 
-use crate::spinlock::Mutex;
+use crate::{proc::Condvar, spinlock::Mutex};
 
 const BACKSPACE: c_int = 0x100;
 
@@ -46,7 +46,7 @@ struct Cons {
     /// input
     buf: [c_char; 128],
     /// Read index
-    r: usize,
+    r: Condvar<usize>,
     /// Write index
     w: usize,
     /// Edit index
@@ -57,7 +57,7 @@ static CONS: Mutex<Cons> = Mutex::new(
     c"cons",
     Cons {
         buf: [0; _],
-        r: 0,
+        r: Condvar::new(0),
         w: 0,
         e: 0,
     },
@@ -93,24 +93,22 @@ unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int 
     while n > 0 {
         // wait until interrupt handler has put some
         // input into cons.buffer.
-        while cons.r == cons.w {
-            unsafe {
-                if crate::sys::killed(crate::sys::myproc()) != 0 {
-                    return -1;
-                }
-                crate::sys::sleep((&raw mut cons.r).cast(), cons.lock.inner.get());
+        while cons.r.0 == cons.w {
+            if unsafe { crate::sys::killed(crate::sys::myproc()) } != 0 {
+                return -1;
             }
+            cons = Condvar::wait(&cons.r, cons);
         }
 
-        let c = cons.buf[cons.r % cons.buf.len()];
-        cons.r += 1;
+        let c = cons.buf[cons.r.0 % cons.buf.len()];
+        cons.r.0 += 1;
 
         // end-of-file
         if c == ctrl(b'D') {
             if n < target {
                 // Save ^D for next time, to make sure
                 // caller gets a 0-byte result.
-                cons.r -= 1;
+                cons.r.0 -= 1;
             }
             break;
         }
@@ -159,7 +157,7 @@ pub(super) fn intr(mut c: u8) {
             cons.e -= 1;
             putc(BACKSPACE);
         }
-    } else if c != 0 && cons.e.wrapping_sub(cons.r) < cons.buf.len() {
+    } else if c != 0 && cons.e.wrapping_sub(cons.r.0) < cons.buf.len() {
         if c == b'\r' {
             c = b'\n';
         }
@@ -172,7 +170,7 @@ pub(super) fn intr(mut c: u8) {
         cons.buf[e] = c;
         cons.e += 1;
 
-        if c == b'\n' || c == ctrl(b'D') || cons.e.wrapping_sub(cons.r) == cons.buf.len() {
+        if c == b'\n' || c == ctrl(b'D') || cons.e.wrapping_sub(cons.r.0) == cons.buf.len() {
             // wake up consoleread() if a whole line (or end-of-file)
             // has arrived.
             cons.w = cons.e;

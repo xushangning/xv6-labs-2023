@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(allocator_api)]
+#![feature(arbitrary_self_types_pointers)]
 
 extern crate alloc;
 

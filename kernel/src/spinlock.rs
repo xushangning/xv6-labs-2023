@@ -9,7 +9,7 @@ use crate::sys::spinlock;
 
 /// Mutual exclusion spin locks.
 pub(crate) struct Mutex<T: ?Sized> {
-    pub(crate) inner: UnsafeCell<spinlock>,
+    inner: UnsafeCell<spinlock>,
     data: UnsafeCell<T>,
 }
 

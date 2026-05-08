@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use crate::{sys::myproc, trap::TICKS};
+use crate::{proc::Condvar, sys::myproc, trap::TICKS};
 
 pub(super) unsafe extern "C" fn exit() -> u64 {
     let mut n = MaybeUninit::uninit();
@@ -49,14 +49,14 @@ pub(super) unsafe extern "C" fn sleep() -> u64 {
     if n < 0 {
         n = 0;
     }
-    let ticks = TICKS.lock();
-    let ticks0 = *ticks;
-    while *ticks - ticks0 < n.try_into().unwrap() {
+    let mut ticks = TICKS.lock();
+    let ticks0 = ticks.0;
+    while ticks.0 - ticks0 < n.try_into().unwrap() {
         unsafe {
             if killed(myproc()) != 0 {
                 return (-1i64).cast_unsigned();
             }
-            crate::sys::sleep((&raw const TICKS).cast_mut().cast(), ticks.lock.inner.get());
+            ticks = Condvar::wait(&*ticks, ticks);
         }
     }
     0
@@ -71,5 +71,5 @@ pub(super) unsafe extern "C" fn kill() -> u64 {
 }
 
 pub(super) unsafe extern "C" fn uptime() -> u64 {
-    (*TICKS.lock()).into()
+    TICKS.lock().0.into()
 }
