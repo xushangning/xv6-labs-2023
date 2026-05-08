@@ -14,6 +14,7 @@ bench = false
 
 [dependencies]
 bitflags = "2.11.1"
+heapless = "0.9.3"
 riscv = "0.15.0"
 
 [build-dependencies]

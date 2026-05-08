@@ -2,11 +2,18 @@
 //! Mostly argument checking, since we don't trust
 //! user code, and calls into file.c and fs.c.
 
-use core::{ffi::c_int, mem::MaybeUninit, ptr};
+use core::{
+    ffi::{c_char, c_int},
+    mem::MaybeUninit,
+    ptr,
+};
+
+use alloc::boxed::Box;
 
 use crate::{
     file::File,
-    sys::{NOFILE, argaddr, argint, myproc},
+    kalloc::Page,
+    sys::{NOFILE, argaddr, argint, argstr, fetchaddr, fetchstr, myproc},
 };
 
 /// Fetch the nth word-sized system call argument as a file descriptor
@@ -47,6 +54,60 @@ pub(super) unsafe extern "C" fn read() -> u64 {
     }
     unsafe {
         (*f).read(p.assume_init(), n.assume_init())
+            .cast_unsigned()
+            .into()
+    }
+}
+
+pub(super) unsafe extern "C" fn exec() -> u64 {
+    use crate::param::MAXPATH;
+
+    let mut uargv = MaybeUninit::<*const u64>::uninit();
+
+    unsafe { argaddr(1, uargv.as_mut_ptr().cast()) };
+    let mut path = MaybeUninit::<[c_char; MAXPATH]>::uninit();
+    if unsafe { argstr(0, path.as_mut_ptr().cast(), MAXPATH.try_into().unwrap()) } < 0 {
+        return (-1i64).cast_unsigned();
+    }
+    let mut argv = heapless::Vec::<Option<Box<MaybeUninit<Page>>>, { crate::param::MAXARG }>::new();
+    for i in 0..argv.capacity() {
+        let mut uarg = MaybeUninit::uninit();
+        if unsafe {
+            fetchaddr(
+                uargv.assume_init().add(i).addr().try_into().unwrap(),
+                uarg.as_mut_ptr(),
+            )
+        } < 0
+        {
+            return (-1i64).cast_unsigned();
+        }
+        let uarg = unsafe { uarg.assume_init() };
+        if uarg == 0 {
+            unsafe {
+                argv.push_unchecked(None);
+            }
+            break;
+        }
+        let Ok(mut a) = Box::<Page>::try_new_uninit() else {
+            return (-1i64).cast_unsigned();
+        };
+        if unsafe {
+            fetchstr(
+                uarg,
+                a.as_mut_ptr().cast(),
+                crate::riscv::PGSIZE.try_into().unwrap(),
+            )
+        } < 0
+        {
+            return (-1i64).cast_unsigned();
+        }
+        unsafe {
+            argv.push_unchecked(Some(a));
+        };
+    }
+
+    unsafe {
+        crate::sys::exec(path.as_mut_ptr().cast(), argv.as_mut_ptr().cast())
             .cast_unsigned()
             .into()
     }

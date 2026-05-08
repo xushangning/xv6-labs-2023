@@ -8,7 +8,6 @@ mod proc;
 // Prototypes for the functions that handle system calls.
 unsafe extern "C" {
     fn sys_pipe() -> u64;
-    fn sys_exec() -> u64;
     fn sys_fstat() -> u64;
     fn sys_chdir() -> u64;
     fn sys_dup() -> u64;
@@ -31,7 +30,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(sys_pipe),
     Some(file::read),
     Some(proc::kill),
-    Some(sys_exec),
+    Some(file::exec),
     Some(sys_fstat),
     Some(sys_chdir),
     Some(sys_dup),
