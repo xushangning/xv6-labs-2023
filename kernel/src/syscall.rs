@@ -12,7 +12,6 @@ unsafe extern "C" {
     fn sys_chdir() -> u64;
     fn sys_dup() -> u64;
     fn sys_open() -> u64;
-    fn sys_write() -> u64;
     fn sys_mknod() -> u64;
     fn sys_unlink() -> u64;
     fn sys_link() -> u64;
@@ -39,7 +38,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(proc::sleep),
     Some(proc::uptime),
     Some(sys_open),
-    Some(sys_write),
+    Some(file::write),
     Some(sys_mknod),
     Some(sys_unlink),
     Some(sys_link),

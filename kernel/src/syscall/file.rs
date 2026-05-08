@@ -58,6 +58,25 @@ pub(super) unsafe extern "C" fn read() -> u64 {
     }
 }
 
+pub(super) unsafe extern "C" fn write() -> u64 {
+    let mut p = MaybeUninit::uninit();
+    let mut n = MaybeUninit::uninit();
+
+    unsafe {
+        argaddr(1, p.as_mut_ptr());
+        argint(2, n.as_mut_ptr());
+    }
+    let mut f = ptr::null_mut();
+    if argfd(0, None, Some(&mut f)) < 0 {
+        return (-1i64).cast_unsigned();
+    }
+    unsafe {
+        (*f).write(p.assume_init(), n.assume_init())
+            .cast_unsigned()
+            .into()
+    }
+}
+
 pub(super) unsafe extern "C" fn exec() -> u64 {
     use crate::param::MAXPATH;
 

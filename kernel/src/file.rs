@@ -2,6 +2,8 @@
 
 use core::ffi::{c_char, c_int, c_short, c_uint};
 
+use crate::log::OpGuard;
+
 unsafe extern "C" {
     static devsw: [crate::sys::devsw; crate::sys::NDEV as usize];
 }
@@ -58,6 +60,69 @@ impl File {
                 r
             },
             FileType::None => panic!("fileread"),
+        }
+    }
+
+    /// Write to file f.
+    /// addr is a user virtual address.
+    pub(super) fn write(&mut self, addr: u64, n: c_int) -> c_int {
+        if self.writable == 0 {
+            return -1;
+        }
+        match self.type_ {
+            FileType::Pipe => unsafe { crate::sys::pipewrite(self.pipe, addr, n) },
+            FileType::Device => {
+                let major = self.major;
+                if major < 0 || major >= crate::sys::NDEV.try_into().unwrap() {
+                    return -1;
+                }
+                unsafe {
+                    match devsw[usize::try_from(major).unwrap()].write {
+                        Some(f) => f(1, addr, n),
+                        None => -1,
+                    }
+                }
+            }
+            FileType::Inode => {
+                // write a few blocks at a time to avoid exceeding
+                // the maximum log transaction size, including
+                // i-node, indirect block, allocation blocks,
+                // and 2 blocks of slop for non-aligned writes.
+                // this really belongs lower down, since writei()
+                // might be writing a device like the console.
+                let max = (((crate::sys::MAXOPBLOCKS as c_int) - 1 - 1 - 2) / 2)
+                    * (crate::sys::BSIZE as c_int);
+                let mut i: c_int = 0;
+                while i < n {
+                    let mut n1 = n - i;
+                    if n1 > max {
+                        n1 = max;
+                    }
+                    let r: c_int = unsafe {
+                        let _op_guard = OpGuard::new();
+                        crate::sys::ilock(self.ip);
+                        let r = crate::sys::writei(
+                            self.ip,
+                            1,
+                            addr + i as u64,
+                            self.off,
+                            n1.try_into().unwrap(),
+                        );
+                        if r > 0 {
+                            self.off += r.cast_unsigned();
+                        }
+                        crate::sys::iunlock(self.ip);
+                        r
+                    };
+                    if r != n1 {
+                        // error from writei
+                        break;
+                    }
+                    i += r;
+                }
+                if i == n { n } else { -1 }
+            }
+            FileType::None => panic!("filewrite"),
         }
     }
 }
