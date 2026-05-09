@@ -54,7 +54,7 @@ Notable functions whose names changed completely during migration. Useful when t
 </thead>
 <tbody>
   <tr>
-    <td rowspan="4"><code>vm.c</code></td>
+    <td rowspan="5"><code>vm.c</code></td>
     <td><code>mappages</code></td>
     <td><code>PageTable::insert</code></td>
     <td>Map virtual→physical pages</td>
@@ -73,6 +73,11 @@ Notable functions whose names changed completely during migration. Useful when t
     <td><code>freewalk</code></td>
     <td><code>Drop::drop</code> for <code>PageTable</code></td>
     <td>Recursive page table free</td>
+  </tr>
+  <tr>
+    <td><code>uvmfree</code></td>
+    <td><code>Drop::drop</code> for <code>Vm</code></td>
+    <td>Free the page table and associated memory</td>
   </tr>
   <tr>
     <td><code>kalloc.c</code></td>

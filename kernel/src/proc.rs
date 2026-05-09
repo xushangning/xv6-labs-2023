@@ -14,7 +14,7 @@ use crate::{
         acquire, myproc, procstate_RUNNABLE, procstate_SLEEPING, procstate_UNUSED,
         procstate_ZOMBIE, release, safestrcpy, spinlock, uvmunmap, wakeup,
     },
-    vm::{PageTable, PteFlags, uvmfree},
+    vm::{PageTable, PteFlags, Vm},
 };
 
 #[repr(C)]
@@ -113,7 +113,10 @@ impl Drop for Proc {
     fn drop(&mut self) {
         self.trapframe = None;
         if let Some(pt) = self.pagetable.take() {
-            proc_freepagetable(pt, self.sz.try_into().unwrap());
+            proc_freepagetable(Vm {
+                pagetable: pt,
+                sz: self.sz.try_into().unwrap(),
+            });
         }
         self.sz = 0;
         self.pid = 0;
@@ -130,51 +133,41 @@ impl Drop for Proc {
 /// but with trampoline and trapframe pages.
 fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
     // An empty page table.
-    let mut pagetable = crate::vm::uvmcreate().map_err(|_| ())?;
+    let mut vm = Vm::new(crate::vm::uvmcreate().map_err(|_| ())?);
 
     // map the trampoline code (for system call return)
     // at the highest user virtual address.
     // only the supervisor uses it, on the way
     // to/from user space, so not PTE_U.
-    if pagetable
-        .insert(
-            TRAMPOLINE..TRAMPOLINE + PGSIZE,
-            crate::trampoline::trampoline as *const _,
-            PteFlags::R | PteFlags::X,
-        )
-        .is_err()
-    {
-        uvmfree(pagetable, 0);
-        return Err(());
-    }
+    vm.pagetable.insert(
+        TRAMPOLINE..TRAMPOLINE + PGSIZE,
+        crate::trampoline::trampoline as *const _,
+        PteFlags::R | PteFlags::X,
+    )?;
 
     // map the trapframe page just below the trampoline page, for
     // trampoline.S.
-    if pagetable
-        .insert(
-            TRAPFRAME..TRAPFRAME + PGSIZE,
-            p.trapframe.as_ref().unwrap().as_ptr().cast(),
-            PteFlags::R | PteFlags::W,
-        )
-        .is_err()
-    {
-        unsafe {
-            uvmunmap(pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
+    match vm.pagetable.insert(
+        TRAPFRAME..TRAPFRAME + PGSIZE,
+        p.trapframe.as_ref().unwrap().as_ptr().cast(),
+        PteFlags::R | PteFlags::W,
+    ) {
+        Ok(_) => Ok(vm.leak()),
+        Err(_) => {
+            unsafe {
+                uvmunmap(vm.pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
+            }
+            Err(())
         }
-        uvmfree(pagetable, 0);
-        return Err(());
     }
-
-    Ok(pagetable)
 }
 
 /// Free a process's page table, and free the
 /// physical memory it refers to.
-fn proc_freepagetable(mut pagetable: Box<PageTable>, sz: usize) {
+fn proc_freepagetable(mut vm: Vm) {
     unsafe {
-        uvmunmap(pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
-        uvmunmap(pagetable.as_mut(), TRAPFRAME.try_into().unwrap(), 1, 0);
-        uvmfree(pagetable, sz);
+        uvmunmap(vm.pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
+        uvmunmap(vm.pagetable.as_mut(), TRAPFRAME.try_into().unwrap(), 1, 0);
     }
 }
 

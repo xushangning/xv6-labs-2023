@@ -1,6 +1,6 @@
 use alloc::{alloc::AllocError, boxed::Box};
 use core::{
-    mem,
+    mem::{self, ManuallyDrop},
     ops::{Deref, DerefMut, Range},
     ptr,
 };
@@ -20,6 +20,12 @@ pub struct PageTable(PageTableLevel);
 
 #[repr(C, align(4096))]
 struct PageTableLevel([Pte; 512]);
+
+#[repr(C)]
+pub(super) struct Vm {
+    pub(super) pagetable: Box<PageTable>,
+    pub(super) sz: usize,
+}
 
 impl Pte {
     fn new(pa: *const Page, flags: PteFlags) -> Self {
@@ -204,11 +210,24 @@ impl Drop for PageTableLevel {
     }
 }
 
-/// Free user memory pages,
-/// then free page-table pages.
-pub(super) fn uvmfree(mut pagetable: Box<PageTable>, sz: usize) {
-    if sz > 0 {
-        pagetable.remove(0..sz, true);
+impl Vm {
+    pub(super) fn new(pagetable: Box<PageTable>) -> Self {
+        Self { pagetable, sz: 0 }
+    }
+
+    pub(super) fn leak(self) -> Box<PageTable> {
+        let mut vm = ManuallyDrop::new(self);
+        unsafe { (&raw mut vm.pagetable).read() }
+    }
+}
+
+impl Drop for Vm {
+    /// Free user memory pages,
+    /// then free page-table pages.
+    fn drop(&mut self) {
+        if self.sz > 0 {
+            self.pagetable.remove(0..self.sz, true);
+        }
     }
 }
 
