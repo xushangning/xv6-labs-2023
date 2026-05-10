@@ -86,10 +86,15 @@ Notable functions whose names changed completely during migration. Useful when t
     <td>Kernel page allocator</td>
   </tr>
   <tr>
-    <td rowspan="2"><code>proc.c</code></td>
+    <td rowspan="3"><code>proc.c</code></td>
     <td><code>freeproc</code></td>
     <td><code>Drop::drop</code> for <code>proc_</code></td>
     <td>Release process resources</td>
+  </tr>
+  <tr>
+    <td><code>proc_{,free}pagetable</code></td>
+    <td><code>ProcVm::{new,drop}</code></td>
+    <td>Create and free process page tables</td>
   </tr>
   <tr>
     <td><code>sleep</code>, <code>wakeup</code></td>

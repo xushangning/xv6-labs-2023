@@ -1,6 +1,6 @@
 use alloc::{alloc::AllocError, boxed::Box};
 use core::{
-    mem::{self, ManuallyDrop},
+    mem,
     num::NonZero,
     ops::{Deref, DerefMut, Range},
     ptr,
@@ -235,11 +235,6 @@ impl Drop for PageTableLevel {
 impl Vm {
     pub(super) fn new(pagetable: Box<PageTable>) -> Self {
         Self { pagetable, sz: 0 }
-    }
-
-    pub(super) fn leak(self) -> Box<PageTable> {
-        let mut vm = ManuallyDrop::new(self);
-        unsafe { (&raw mut vm.pagetable).read() }
     }
 }
 

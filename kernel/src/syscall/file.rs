@@ -2,13 +2,12 @@
 //! Mostly argument checking, since we don't trust
 //! user code, and calls into file.c and fs.c.
 
+use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int},
     mem::MaybeUninit,
     ptr, slice,
 };
-
-use alloc::boxed::Box;
 
 use crate::{
     file::File,

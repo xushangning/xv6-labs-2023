@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
-    mem::{self, MaybeUninit},
+    mem::{self, ManuallyDrop, MaybeUninit},
     ptr,
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
@@ -12,7 +12,7 @@ use crate::{
     spinlock::MutexGuard,
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_SLEEPING, procstate_UNUSED,
-        procstate_ZOMBIE, release, safestrcpy, spinlock, uvmunmap, wakeup,
+        procstate_ZOMBIE, release, safestrcpy, spinlock, wakeup,
     },
     vm::{PageTable, PteFlags, Vm},
 };
@@ -82,12 +82,12 @@ fn allocproc() -> *mut Proc {
                 }
 
                 // An empty user page table.
-                let Ok(pt) = proc_pagetable(p) else {
+                let Ok(proc_vm) = ProcVm::new(p) else {
                     ptr::drop_in_place(p);
                     release(&mut p.lock);
                     return ptr::null_mut();
                 };
-                p.pagetable = Some(pt);
+                p.pagetable = Some(proc_vm.leak());
 
                 // Set up new context to start executing at forkret,
                 // which returns to user space.
@@ -113,10 +113,10 @@ impl Drop for Proc {
     fn drop(&mut self) {
         self.trapframe = None;
         if let Some(pt) = self.pagetable.take() {
-            proc_freepagetable(Vm {
+            mem::drop(ProcVm(Vm {
                 pagetable: pt,
                 sz: self.sz.try_into().unwrap(),
-            });
+            }));
         }
         self.sz = 0;
         self.pid = 0;
@@ -129,45 +129,56 @@ impl Drop for Proc {
     }
 }
 
-/// Create a user page table for a given process, with no user memory,
-/// but with trampoline and trapframe pages.
-fn proc_pagetable(p: &mut Proc) -> Result<Box<PageTable>, ()> {
-    // An empty page table.
-    let mut vm = Vm::new(crate::vm::uvmcreate().map_err(|_| ())?);
+#[repr(transparent)]
+pub(super) struct ProcVm(pub(super) Vm);
 
-    // map the trampoline code (for system call return)
-    // at the highest user virtual address.
-    // only the supervisor uses it, on the way
-    // to/from user space, so not PTE_U.
-    vm.pagetable.insert(
-        TRAMPOLINE..TRAMPOLINE + PGSIZE,
-        crate::trampoline::trampoline as *const _,
-        PteFlags::R | PteFlags::X,
-    )?;
+impl ProcVm {
+    /// Create a user page table for a given process, with no user memory,
+    /// but with trampoline and trapframe pages.
+    pub(super) fn new(p: &Proc) -> Result<Self, ()> {
+        let mut vm = Vm::new(crate::vm::uvmcreate().map_err(|_| ())?);
 
-    // map the trapframe page just below the trampoline page, for
-    // trampoline.S.
-    match vm.pagetable.insert(
-        TRAPFRAME..TRAPFRAME + PGSIZE,
-        p.trapframe.as_ref().unwrap().as_ptr().cast(),
-        PteFlags::R | PteFlags::W,
-    ) {
-        Ok(_) => Ok(vm.leak()),
-        Err(_) => {
-            unsafe {
-                uvmunmap(vm.pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
+        // map the trampoline code (for system call return)
+        // at the highest user virtual address.
+        // only the supervisor uses it, on the way
+        // to/from user space, so not PTE_U.
+        vm.pagetable.insert(
+            TRAMPOLINE..TRAMPOLINE + PGSIZE,
+            crate::trampoline::trampoline as *const _,
+            PteFlags::R | PteFlags::X,
+        )?;
+
+        // map the trapframe page just below the trampoline page, for
+        // trampoline.S.
+        match vm.pagetable.insert(
+            TRAPFRAME..TRAPFRAME + PGSIZE,
+            p.trapframe.as_ref().unwrap().as_ptr().cast(),
+            PteFlags::R | PteFlags::W,
+        ) {
+            Ok(_) => Ok(Self(vm)),
+            Err(_) => {
+                vm.pagetable.remove(TRAMPOLINE..TRAMPOLINE + PGSIZE, false);
+                Err(())
             }
-            Err(())
         }
+    }
+
+    pub(super) fn leak(self) -> Box<PageTable> {
+        let mut vm = ManuallyDrop::new(self);
+        unsafe { (&raw mut vm.0.pagetable).read() }
     }
 }
 
-/// Free a process's page table, and free the
-/// physical memory it refers to.
-pub(super) fn proc_freepagetable(mut vm: Vm) {
-    unsafe {
-        uvmunmap(vm.pagetable.as_mut(), TRAMPOLINE.try_into().unwrap(), 1, 0);
-        uvmunmap(vm.pagetable.as_mut(), TRAPFRAME.try_into().unwrap(), 1, 0);
+impl Drop for ProcVm {
+    /// Free a process's page table, and free the
+    /// physical memory it refers to.
+    fn drop(&mut self) {
+        self.0
+            .pagetable
+            .remove(TRAMPOLINE..TRAMPOLINE + PGSIZE, false);
+        self.0
+            .pagetable
+            .remove(TRAPFRAME..TRAPFRAME + PGSIZE, false);
     }
 }
 

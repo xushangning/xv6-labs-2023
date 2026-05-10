@@ -1,16 +1,15 @@
-use alloc::boxed::Box;
 use core::{
     ffi::{CStr, c_char},
     mem::{self, DropGuard, MaybeUninit},
     ops::Range,
-    ptr::NonNull,
 };
 
 use crate::{
     fs,
+    proc::ProcVm,
     riscv::PGSIZE,
     sys::{inode, pagetable_t},
-    vm::PteFlags,
+    vm::{PteFlags, Vm},
 };
 
 fn flags2perm(flags: u32) -> PteFlags {
@@ -32,21 +31,13 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
 
     use crate::{
         param::MAXARG,
-        proc::proc_freepagetable,
         riscv::pgroundup,
-        vm::{Vm, copyout, uvmalloc},
+        vm::{copyout, uvmalloc},
     };
 
     let p = unsafe { crate::sys::myproc().as_mut().unwrap() };
 
-    let pagetable = NonNull::new(unsafe { crate::sys::proc_pagetable(p) }).ok_or(())?;
-    let mut vm = DropGuard::new(
-        Vm {
-            pagetable: unsafe { Box::from_non_null(pagetable) },
-            sz: 0,
-        },
-        |vm| proc_freepagetable(vm),
-    );
+    let mut proc_vm = ProcVm::new(p)?;
 
     let elf_entry = {
         unsafe {
@@ -113,9 +104,9 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
             if ph.p_vaddr % PGSIZE as u64 != 0 {
                 return Err(());
             }
-            vm.sz = unsafe {
+            proc_vm.0.sz = unsafe {
                 uvmalloc(
-                    &mut vm,
+                    &mut proc_vm.0,
                     (ph.p_vaddr + ph.p_memsz).try_into().unwrap(),
                     flags2perm(ph.p_flags),
                 )
@@ -125,7 +116,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
             let p_filesz = usize::try_from(ph.p_filesz).unwrap();
             unsafe {
                 loadseg(
-                    vm.pagetable.as_mut(),
+                    proc_vm.0.pagetable.as_mut(),
                     p_vaddr..p_vaddr + p_filesz,
                     *ip,
                     ph.p_offset.try_into().unwrap(),
@@ -141,16 +132,16 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
     // Allocate two pages at the next page boundary.
     // Make the first inaccessible as a stack guard.
     // Use the second as the user stack.
-    vm.sz = pgroundup(vm.sz);
-    let newsz = vm.sz + 2 * PGSIZE;
-    vm.sz = unsafe { uvmalloc(&mut vm, newsz, PteFlags::W) }?.get();
+    proc_vm.0.sz = pgroundup(proc_vm.0.sz);
+    let newsz = proc_vm.0.sz + 2 * PGSIZE;
+    proc_vm.0.sz = unsafe { uvmalloc(&mut proc_vm.0, newsz, PteFlags::W) }?.get();
     unsafe {
         crate::sys::uvmclear(
-            vm.pagetable.as_mut(),
-            (vm.sz - 2 * PGSIZE).try_into().unwrap(),
+            proc_vm.0.pagetable.as_mut(),
+            (proc_vm.0.sz - 2 * PGSIZE).try_into().unwrap(),
         );
     }
-    let mut sp = vm.sz;
+    let mut sp = proc_vm.0.sz;
     let stackbase = sp - PGSIZE;
 
     // Push argument strings, prepare rest of stack in ustack.
@@ -166,7 +157,11 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
             return Err(());
         }
         unsafe {
-            copyout(vm.pagetable.as_mut(), sp.try_into().unwrap(), arg_bytes)?;
+            copyout(
+                proc_vm.0.pagetable.as_mut(),
+                sp.try_into().unwrap(),
+                arg_bytes,
+            )?;
             ustack.push_unchecked(sp);
         }
     }
@@ -182,7 +177,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
     }
     unsafe {
         copyout(
-            vm.pagetable.as_mut(),
+            proc_vm.0.pagetable.as_mut(),
             sp,
             bytemuck::cast_slice(ustack.as_slice()),
         )?;
@@ -212,17 +207,16 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
 
     // Commit to the user image.
     let oldpagetable = p.pagetable.take().unwrap();
-    let vm = DropGuard::dismiss(vm);
-    p.sz = vm.sz.try_into().unwrap();
-    p.pagetable = Some(vm.leak());
+    p.sz = proc_vm.0.sz.try_into().unwrap();
+    p.pagetable = Some(proc_vm.leak());
     unsafe {
         p.trapframe.as_mut().unwrap().assume_init_mut().epc = elf_entry;
         p.trapframe.as_mut().unwrap().assume_init_mut().sp = sp.try_into().unwrap();
     }
-    proc_freepagetable(Vm {
+    mem::drop(ProcVm(Vm {
         pagetable: oldpagetable,
         sz: oldsz.try_into().unwrap(),
-    });
+    }));
 
     Ok(ustack.len() - 1)
 }
