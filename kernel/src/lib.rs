@@ -16,6 +16,7 @@ mod file;
 mod fs;
 mod kalloc;
 mod kernelvec;
+mod log;
 mod memlayout;
 mod param;
 mod printf;

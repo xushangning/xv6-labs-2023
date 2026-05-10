@@ -6,6 +6,7 @@ use core::{
 
 use crate::{
     fs,
+    log::OpGuard,
     proc::ProcVm,
     riscv::PGSIZE,
     sys::{inode, pagetable_t},
@@ -40,10 +41,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
     let mut proc_vm = ProcVm::new(p)?;
 
     let elf_entry = {
-        unsafe {
-            crate::sys::begin_op();
-        }
-        let _ = DropGuard::new((), |_| unsafe { crate::sys::end_op() });
+        let _op_guard = OpGuard::new();
 
         let ip = unsafe { crate::sys::namei(path.cast_mut()) };
         if ip.is_null() {
