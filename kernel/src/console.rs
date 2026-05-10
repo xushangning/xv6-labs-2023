@@ -12,7 +12,7 @@ use core::{
     mem::MaybeUninit,
 };
 
-use crate::{proc::Condvar, spinlock::Mutex};
+use crate::{file::Device, proc::Condvar, spinlock::Mutex};
 
 const BACKSPACE: c_int = 0x100;
 
@@ -42,7 +42,7 @@ pub(super) fn putc(c: c_int) {
     }
 }
 
-struct Cons {
+pub(super) struct Cons {
     /// input
     buf: [c_char; 128],
     /// Read index
@@ -53,7 +53,7 @@ struct Cons {
     e: usize,
 }
 
-static CONS: Mutex<Cons> = Mutex::new(
+pub(super) static CONS: Mutex<Cons> = Mutex::new(
     c"cons",
     Cons {
         buf: [0; _],
@@ -63,73 +63,79 @@ static CONS: Mutex<Cons> = Mutex::new(
     },
 );
 
-unsafe extern "C" fn write(user_src: c_int, src: u64, n: c_int) -> c_int {
-    for i in 0..n {
-        let mut c: MaybeUninit<c_char> = MaybeUninit::uninit();
-        if unsafe {
-            crate::sys::either_copyin(
-                c.as_mut_ptr().cast(),
-                user_src,
-                src + u64::try_from(i).unwrap(),
-                1,
-            )
-        } == -1
-        {
-            return i;
+impl Device for Mutex<Cons> {
+    /// user write()s to the console go here.
+    fn write(&self, user_src: bool, src: u64, n: c_int) -> c_int {
+        for i in 0..n {
+            let mut c: MaybeUninit<c_char> = MaybeUninit::uninit();
+            if unsafe {
+                crate::sys::either_copyin(
+                    c.as_mut_ptr().cast(),
+                    user_src.into(),
+                    src + u64::try_from(i).unwrap(),
+                    1,
+                )
+            } == -1
+            {
+                return i;
+            }
+            unsafe { crate::sys::uartputc(c.assume_init().into()) };
         }
-        unsafe { crate::sys::uartputc(c.assume_init().into()) };
+
+        n
     }
 
-    n
-}
-
-/// user read()s from the console go here.
-/// copy (up to) a whole input line to dst.
-/// user_dist indicates whether dst is a user
-/// or kernel address.
-unsafe extern "C" fn read(user_dst: c_int, mut dst: u64, mut n: c_int) -> c_int {
-    let target = n;
-    let mut cons = CONS.lock();
-    while n > 0 {
-        // wait until interrupt handler has put some
-        // input into cons.buffer.
-        while cons.r.0 == cons.w {
-            if unsafe { crate::sys::killed(crate::sys::myproc()) } != 0 {
-                return -1;
+    /// user read()s from the console go here.
+    /// copy (up to) a whole input line to dst.
+    /// user_dist indicates whether dst is a user
+    /// or kernel address.
+    fn read(&self, user_dst: bool, mut dst: u64, mut n: c_int) -> c_int {
+        let target = n;
+        let mut cons = self.lock();
+        while n > 0 {
+            // wait until interrupt handler has put some
+            // input into cons.buffer.
+            while cons.r.0 == cons.w {
+                if unsafe { crate::sys::killed(crate::sys::myproc()) } != 0 {
+                    return -1;
+                }
+                cons = Condvar::wait(&cons.r, cons);
             }
-            cons = Condvar::wait(&cons.r, cons);
-        }
 
-        let c = cons.buf[cons.r.0 % cons.buf.len()];
-        cons.r.0 += 1;
+            let c = cons.buf[cons.r.0 % cons.buf.len()];
+            cons.r.0 += 1;
 
-        // end-of-file
-        if c == ctrl(b'D') {
-            if n < target {
-                // Save ^D for next time, to make sure
-                // caller gets a 0-byte result.
-                cons.r.0 -= 1;
+            // end-of-file
+            if c == ctrl(b'D') {
+                if n < target {
+                    // Save ^D for next time, to make sure
+                    // caller gets a 0-byte result.
+                    cons.r.0 -= 1;
+                }
+                break;
             }
-            break;
+
+            // copy the input byte to the user-space buffer.
+            let mut cbuf = c;
+            if unsafe {
+                crate::sys::either_copyout(user_dst.into(), dst, (&raw mut cbuf).cast(), 1)
+            } == -1
+            {
+                break;
+            }
+
+            dst += 1;
+            n -= 1;
+
+            if c == b'\n' {
+                // a whole line has arrived, return to
+                // the user-level read().
+                break;
+            }
         }
 
-        // copy the input byte to the user-space buffer.
-        let mut cbuf = c;
-        if unsafe { crate::sys::either_copyout(user_dst, dst, (&raw mut cbuf).cast(), 1) } == -1 {
-            break;
-        }
-
-        dst += 1;
-        n -= 1;
-
-        if c == b'\n' {
-            // a whole line has arrived, return to
-            // the user-level read().
-            break;
-        }
+        target - n
     }
-
-    target - n
 }
 
 /// the console input interrupt handler.
@@ -180,19 +186,7 @@ pub(super) fn intr(mut c: u8) {
 }
 
 pub(super) fn init() {
-    use crate::sys::devsw;
-
     unsafe {
         crate::sys::uartinit();
-
-        // connect read and write system calls
-        // to consoleread and consolewrite.
-        (*&raw mut devsw)
-            .as_mut_ptr()
-            .add(crate::sys::CONSOLE as usize)
-            .write(devsw {
-                read: Some(read),
-                write: Some(write),
-            });
     }
 }

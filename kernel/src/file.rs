@@ -2,11 +2,23 @@
 
 use core::ffi::{c_char, c_int, c_short, c_uint};
 
-use crate::log::OpGuard;
+use crate::{log::OpGuard, param::NDEV};
 
-unsafe extern "C" {
-    static devsw: [crate::sys::devsw; crate::sys::NDEV as usize];
+pub(super) trait Device {
+    fn read(&self, user_dst: bool, dst: u64, n: c_int) -> c_int;
+    fn write(&self, user_dst: bool, src: u64, n: c_int) -> c_int;
 }
+
+type DevSw = [Option<&'static dyn Device>; NDEV];
+
+/// map major device number to device functions.
+const DEVSW: DevSw = {
+    const CONSOLE: usize = 1;
+
+    let mut arr: DevSw = [None; _];
+    arr[CONSOLE] = Some(&crate::console::CONS);
+    arr
+};
 
 #[repr(C)]
 #[allow(dead_code)]
@@ -39,15 +51,15 @@ impl File {
         match self.type_ {
             FileType::Pipe => unsafe { crate::sys::piperead(self.pipe, addr, n) },
             FileType::Device => {
-                let major = self.major;
-                if major < 0 || major >= crate::sys::NDEV.try_into().unwrap() {
+                let Ok(major) = usize::try_from(self.major) else {
                     return -1;
-                }
-                unsafe {
-                    match devsw[usize::try_from(major).unwrap()].read {
-                        Some(f) => f(1, addr, n),
+                };
+                match DEVSW.get(major) {
+                    Some(d) => match d.as_ref() {
+                        Some(d) => d.read(true, addr, n),
                         None => -1,
-                    }
+                    },
+                    None => -1,
                 }
             }
             FileType::Inode => unsafe {
@@ -72,15 +84,15 @@ impl File {
         match self.type_ {
             FileType::Pipe => unsafe { crate::sys::pipewrite(self.pipe, addr, n) },
             FileType::Device => {
-                let major = self.major;
-                if major < 0 || major >= crate::sys::NDEV.try_into().unwrap() {
+                let Ok(major) = usize::try_from(self.major) else {
                     return -1;
-                }
-                unsafe {
-                    match devsw[usize::try_from(major).unwrap()].write {
-                        Some(f) => f(1, addr, n),
+                };
+                match DEVSW.get(major) {
+                    Some(d) => match d.as_ref() {
+                        Some(d) => d.write(true, addr, n),
                         None => -1,
-                    }
+                    },
+                    None => -1,
                 }
             }
             FileType::Inode => {
