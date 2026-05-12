@@ -19,6 +19,7 @@ mod kernelvec;
 mod log;
 mod memlayout;
 mod param;
+mod pipe;
 mod printf;
 mod proc;
 mod riscv;

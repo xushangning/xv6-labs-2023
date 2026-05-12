@@ -48,6 +48,8 @@ fn main() {
         .raw_line("pub type pagetable_t = *mut crate::vm::PageTable;")
         .blocklist_type("file")
         .raw_line("pub type file = crate::file::File;")
+        .blocklist_type("pipe")
+        .raw_line("pub type pipe = crate::pipe::Pipe;")
         .generate()
         .expect("Unable to generate bindings");
 
