@@ -1,16 +1,34 @@
-use core::ffi::CStr;
+use core::{
+    ffi::{CStr, c_char, c_int},
+    mem::MaybeUninit,
+};
 
 use crate::sys::myproc;
 
 mod file;
 mod proc;
 
+/// Fetch the nth 32-bit system call argument.
+unsafe fn argint(n: c_int) -> c_int {
+    unsafe {
+        let mut i = MaybeUninit::<c_int>::uninit();
+        crate::sys::argint(n, i.as_mut_ptr());
+        i.assume_init()
+    }
+}
+
+/// Fetch the nth word-sized system call argument as a null-terminated string.
+/// Copies into buf, at most max.
+/// Returns string length if OK (including nul), -1 if error.
+unsafe fn argstr(n: c_int, buf: &mut [MaybeUninit<c_char>]) -> c_int {
+    unsafe { crate::sys::argstr(n, buf.as_mut_ptr().cast(), buf.len().try_into().unwrap()) }
+}
+
 // Prototypes for the functions that handle system calls.
 unsafe extern "C" {
     fn sys_fstat() -> u64;
     fn sys_chdir() -> u64;
     fn sys_dup() -> u64;
-    fn sys_open() -> u64;
     fn sys_mknod() -> u64;
     fn sys_unlink() -> u64;
     fn sys_link() -> u64;
@@ -36,7 +54,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(proc::sbrk),
     Some(proc::sleep),
     Some(proc::uptime),
-    Some(sys_open),
+    Some(file::open),
     Some(file::write),
     Some(sys_mknod),
     Some(sys_unlink),

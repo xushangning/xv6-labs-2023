@@ -50,6 +50,8 @@ fn main() {
         .raw_line("pub type file = crate::file::File;")
         .blocklist_type("pipe")
         .raw_line("pub type pipe = crate::pipe::Pipe;")
+        .blocklist_type("inode")
+        .raw_line("pub type inode = crate::fs::Inode;")
         .generate()
         .expect("Unable to generate bindings");
 

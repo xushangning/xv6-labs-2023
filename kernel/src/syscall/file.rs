@@ -9,20 +9,26 @@ use core::{
     ptr, slice,
 };
 
+use super::{argint, argstr};
 use crate::{
     file::File,
     kalloc::Page,
-    sys::{NOFILE, argaddr, argint, argstr, fetchaddr, fetchstr, fileclose, myproc},
+    sys::{NOFILE, argaddr, fetchaddr, fetchstr, fileclose, myproc},
 };
+
+unsafe extern "C" {
+    fn create(
+        path: *mut c_char,
+        type_: core::ffi::c_short,
+        major: core::ffi::c_short,
+        minor: core::ffi::c_short,
+    ) -> *mut crate::sys::inode;
+}
 
 /// Fetch the nth word-sized system call argument as a file descriptor
 /// and return both the descriptor and the corresponding struct file.
 fn argfd(n: c_int, pfd: Option<&mut c_int>, pf: Option<&mut *mut File>) -> c_int {
-    let fd = unsafe {
-        let mut fd = MaybeUninit::<i32>::uninit();
-        argint(n, fd.as_mut_ptr());
-        fd.assume_init()
-    };
+    let fd = unsafe { argint(n) };
     if fd < 0 || fd >= NOFILE.try_into().unwrap() {
         return -1;
     }
@@ -54,40 +60,107 @@ fn fdalloc(f: *mut File) -> c_int {
 
 pub(super) unsafe extern "C" fn read() -> u64 {
     let mut p = MaybeUninit::uninit();
-    let mut n = MaybeUninit::uninit();
 
     unsafe {
         argaddr(1, p.as_mut_ptr());
-        argint(2, n.as_mut_ptr());
     }
+    let n = unsafe { argint(2) };
     let mut f = ptr::null_mut();
     if argfd(0, None, Some(&mut f)) < 0 {
         return (-1i64).cast_unsigned();
     }
-    unsafe {
-        (*f).read(p.assume_init(), n.assume_init())
-            .cast_unsigned()
-            .into()
-    }
+    unsafe { (*f).read(p.assume_init(), n).cast_unsigned().into() }
 }
 
 pub(super) unsafe extern "C" fn write() -> u64 {
     let mut p = MaybeUninit::uninit();
-    let mut n = MaybeUninit::uninit();
 
     unsafe {
         argaddr(1, p.as_mut_ptr());
-        argint(2, n.as_mut_ptr());
     }
+    let n = unsafe { argint(2) };
     let mut f = ptr::null_mut();
     if argfd(0, None, Some(&mut f)) < 0 {
         return (-1i64).cast_unsigned();
     }
-    unsafe {
-        (*f).write(p.assume_init(), n.assume_init())
-            .cast_unsigned()
-            .into()
+    unsafe { (*f).write(p.assume_init(), n).cast_unsigned().into() }
+}
+
+pub(super) unsafe extern "C" fn open() -> u64 {
+    use crate::{
+        fcntl::OMode,
+        file::FileType,
+        log::OpGuard,
+        param::MAXPATH,
+        stat::InodeType,
+        sys::{NDEV, filealloc, fileclose, ilock, itrunc, iunlock, iunlockput, namei},
+    };
+
+    let omode = OMode::from_bits_retain(unsafe { argint(1) });
+    let mut path = MaybeUninit::<[c_char; MAXPATH]>::uninit();
+    if unsafe { argstr(0, path.as_mut()) } < 0 {
+        return (-1i64).cast_unsigned();
     }
+
+    let _op_guard = OpGuard::new();
+
+    let ip = if omode.intersects(OMode::CREATE) {
+        let Some(ip) =
+            (unsafe { create(path.as_mut_ptr().cast(), InodeType::File as i16, 0, 0).as_mut() })
+        else {
+            return (-1i64).cast_unsigned();
+        };
+        ip
+    } else {
+        let Some(ip) = (unsafe { namei(path.as_mut_ptr().cast()).as_mut() }) else {
+            return (-1i64).cast_unsigned();
+        };
+        unsafe { ilock(ip) };
+        if matches!(ip.type_, InodeType::Dir) && omode != OMode::RDONLY {
+            unsafe { iunlockput(ip) };
+            return (-1i64).cast_unsigned();
+        }
+        ip
+    };
+
+    if matches!(ip.type_, InodeType::Device) && (ip.major < 0 || ip.major as u32 >= NDEV) {
+        unsafe { iunlockput(ip) };
+        return (-1i64).cast_unsigned();
+    }
+
+    let Some(f) = (unsafe { filealloc().as_mut() }) else {
+        unsafe { iunlockput(ip) };
+        return (-1i64).cast_unsigned();
+    };
+
+    let fd = fdalloc(f);
+    if fd < 0 {
+        unsafe { fileclose(f) };
+        unsafe { iunlockput(ip) };
+        return (-1i64).cast_unsigned();
+    }
+
+    match ip.type_ {
+        InodeType::Device => {
+            f.type_ = FileType::Device;
+            f.major = ip.major;
+        }
+        _ => {
+            f.type_ = FileType::Inode;
+            f.off = 0;
+        }
+    }
+    f.ip = ip;
+    f.readable = (!omode.intersects(OMode::WRONLY)).into();
+    f.writable = omode.intersects(OMode::WRONLY | OMode::RDWR).into();
+
+    if omode.intersects(OMode::TRUNC) && matches!(ip.type_, InodeType::File) {
+        unsafe { itrunc(ip) };
+    }
+
+    unsafe { iunlock(ip) };
+
+    fd.cast_unsigned().into()
 }
 
 pub(super) unsafe extern "C" fn exec() -> u64 {
@@ -102,7 +175,7 @@ pub(super) unsafe extern "C" fn exec() -> u64 {
     };
 
     let mut path = MaybeUninit::<[c_char; MAXPATH]>::uninit();
-    if unsafe { argstr(0, path.as_mut_ptr().cast(), MAXPATH.try_into().unwrap()) } < 0 {
+    if unsafe { argstr(0, path.as_mut()) } < 0 {
         return (-1i64).cast_unsigned();
     }
     let mut argv = heapless::Vec::<Box<MaybeUninit<Page>>, { crate::param::MAXARG }>::new();

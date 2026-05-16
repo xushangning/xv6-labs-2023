@@ -12,6 +12,7 @@ use core::{
 
 mod console;
 mod exec;
+mod fcntl;
 mod file;
 mod fs;
 mod kalloc;
@@ -25,6 +26,7 @@ mod proc;
 mod riscv;
 mod spinlock;
 mod start;
+mod stat;
 mod sys;
 mod syscall;
 mod trampoline;
