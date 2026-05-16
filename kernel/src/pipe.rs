@@ -1,12 +1,9 @@
 use alloc::boxed::Box;
-use core::{
-    ffi::{c_char, c_int, c_uint},
-    ptr,
-};
+use core::ffi::{c_char, c_int, c_uint};
 
 use crate::{
     file::{File, FileType},
-    sys::{filealloc, fileclose, initlock},
+    sys::{fileclose, initlock},
 };
 
 #[repr(C)]
@@ -24,33 +21,15 @@ pub struct Pipe {
 }
 
 pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
-    let f0;
-    let mut f1 = ptr::null_mut();
-
-    let ok = unsafe {
-        'alloc: {
-            f0 = filealloc();
-            if f0.is_null() {
-                break 'alloc false;
-            }
-            f1 = filealloc();
-            if f1.is_null() {
-                break 'alloc false;
-            }
-            true
-        }
-    };
-    if !ok {
+    let f0 = crate::file::alloc().ok_or(())?.as_ptr();
+    let Some(f1) = crate::file::alloc() else {
         unsafe {
-            if !f0.is_null() {
-                fileclose(f0);
-            }
-            if !f1.is_null() {
-                fileclose(f1);
-            }
+            fileclose(f0);
         }
         return Err(());
-    }
+    };
+    let f1 = f1.as_ptr();
+
     let mut pi = Box::<Pipe>::try_new_uninit().map_err(|_| ())?;
     unsafe {
         let pi = pi.as_mut_ptr();

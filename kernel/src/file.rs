@@ -1,8 +1,14 @@
 //! Support functions for system calls that involve file descriptors.
 
-use core::ffi::{c_char, c_int, c_short, c_uint};
+use core::{
+    ffi::{c_char, c_int, c_short, c_uint},
+    ptr::NonNull,
+};
 
-use crate::{log::OpGuard, param::NDEV};
+use crate::{
+    log::OpGuard,
+    param::{NDEV, NFILE},
+};
 
 pub(super) trait Device {
     fn read(&self, user_dst: bool, dst: u64, n: c_int) -> c_int;
@@ -30,6 +36,16 @@ pub enum FileType {
 }
 
 #[repr(C)]
+struct Ftable {
+    lock: crate::sys::spinlock,
+    file: [File; NFILE],
+}
+
+unsafe extern "C" {
+    static mut ftable: Ftable;
+}
+
+#[repr(C)]
 pub struct File {
     pub type_: FileType,
     pub ref_: c_int,
@@ -39,6 +55,23 @@ pub struct File {
     pub ip: *mut crate::sys::inode,
     pub off: c_uint,
     pub major: c_short,
+}
+
+/// Allocate a file structure.
+pub(super) fn alloc() -> Option<NonNull<File>> {
+    let p = &raw mut ftable;
+    unsafe {
+        crate::sys::acquire(&raw mut (*p).lock);
+        for f in &mut (*p).file {
+            if f.ref_ == 0 {
+                f.ref_ = 1;
+                crate::sys::release(&raw mut (*p).lock);
+                return Some(NonNull::from_mut(f));
+            }
+        }
+        crate::sys::release(&raw mut (*p).lock);
+    }
+    None
 }
 
 impl File {

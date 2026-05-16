@@ -93,7 +93,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         log::OpGuard,
         param::MAXPATH,
         stat::InodeType,
-        sys::{NDEV, filealloc, fileclose, ilock, itrunc, iunlock, iunlockput, namei},
+        sys::{NDEV, fileclose, ilock, itrunc, iunlock, iunlockput, namei},
     };
 
     let omode = OMode::from_bits_retain(unsafe { argint(1) });
@@ -128,10 +128,11 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         return (-1i64).cast_unsigned();
     }
 
-    let Some(f) = (unsafe { filealloc().as_mut() }) else {
+    let Some(mut f) = crate::file::alloc() else {
         unsafe { iunlockput(ip) };
         return (-1i64).cast_unsigned();
     };
+    let f = unsafe { f.as_mut() };
 
     let fd = fdalloc(f);
     if fd < 0 {
