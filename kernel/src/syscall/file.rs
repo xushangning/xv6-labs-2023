@@ -58,6 +58,19 @@ fn fdalloc(f: *mut File) -> c_int {
     -1
 }
 
+pub(super) unsafe extern "C" fn dup() -> u64 {
+    let mut f = ptr::null_mut();
+    if argfd(0, None, Some(&mut f)) < 0 {
+        return (-1i64).cast_unsigned();
+    }
+    let fd = fdalloc(f);
+    if fd < 0 {
+        return (-1i64).cast_unsigned();
+    }
+    unsafe { crate::sys::filedup(f) };
+    fd.cast_unsigned().into()
+}
+
 pub(super) unsafe extern "C" fn read() -> u64 {
     let mut p = MaybeUninit::uninit();
 

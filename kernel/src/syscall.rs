@@ -57,7 +57,6 @@ unsafe fn argstr(n: c_int, buf: &mut [MaybeUninit<c_char>]) -> c_int {
 unsafe extern "C" {
     fn sys_fstat() -> u64;
     fn sys_chdir() -> u64;
-    fn sys_dup() -> u64;
     fn sys_mknod() -> u64;
     fn sys_unlink() -> u64;
     fn sys_link() -> u64;
@@ -77,7 +76,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(file::exec),
     Some(sys_fstat),
     Some(sys_chdir),
-    Some(sys_dup),
+    Some(file::dup),
     Some(proc::getpid),
     Some(proc::sbrk),
     Some(proc::sleep),
