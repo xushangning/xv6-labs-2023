@@ -2,6 +2,7 @@
 #![feature(allocator_api)]
 #![feature(arbitrary_self_types_pointers)]
 #![feature(drop_guard)]
+#![feature(maybe_uninit_as_bytes)]
 
 extern crate alloc;
 

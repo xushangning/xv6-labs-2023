@@ -8,6 +8,35 @@ use crate::sys::myproc;
 mod file;
 mod proc;
 
+/// Fetch the uint64 at addr from the current process.
+fn fetchaddr(addr: usize) -> Result<usize, ()> {
+    let mut i = MaybeUninit::<usize>::uninit();
+    if unsafe { crate::sys::fetchaddr(addr.try_into().unwrap(), i.as_mut_ptr().cast()) } < 0 {
+        Err(())
+    } else {
+        Ok(unsafe { i.assume_init() })
+    }
+}
+
+/// Fetch the nul-terminated string at addr from the current process.
+/// Returns length of string, not including nul, or -1 for error.
+fn fetchstr(addr: usize, buf: &mut [MaybeUninit<c_char>]) -> Result<&CStr, ()> {
+    let p = unsafe { myproc().as_mut().unwrap() };
+    if unsafe {
+        crate::sys::copyinstr(
+            p.pagetable.as_mut().unwrap().as_mut(),
+            buf.as_mut_ptr().cast(),
+            addr.try_into().unwrap(),
+            buf.len().try_into().unwrap(),
+        )
+    } < 0
+    {
+        Err(())
+    } else {
+        Ok(unsafe { CStr::from_ptr(buf.as_ptr().cast()) })
+    }
+}
+
 /// Fetch the nth 32-bit system call argument.
 unsafe fn argint(n: c_int) -> c_int {
     unsafe {

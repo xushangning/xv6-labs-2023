@@ -13,7 +13,7 @@ use super::{argint, argstr};
 use crate::{
     file::File,
     kalloc::Page,
-    sys::{NOFILE, argaddr, fetchaddr, fetchstr, fileclose, myproc},
+    sys::{NOFILE, argaddr, fileclose, myproc},
 };
 
 unsafe extern "C" {
@@ -181,12 +181,8 @@ pub(super) unsafe extern "C" fn exec() -> u64 {
     }
     let mut argv = heapless::Vec::<Box<MaybeUninit<Page>>, { crate::param::MAXARG }>::new();
     for _ in 0..argv.capacity() {
-        let uarg = {
-            let mut uarg = MaybeUninit::uninit();
-            if unsafe { fetchaddr(uargv.addr().try_into().unwrap(), uarg.as_mut_ptr()) } < 0 {
-                return (-1i64).cast_unsigned();
-            }
-            unsafe { uarg.assume_init() }
+        let Ok(uarg) = super::fetchaddr(uargv.addr()) else {
+            return (-1i64).cast_unsigned();
         };
         if uarg == 0 {
             break;
@@ -194,14 +190,7 @@ pub(super) unsafe extern "C" fn exec() -> u64 {
         let Ok(mut arg) = Box::<Page>::try_new_uninit() else {
             return (-1i64).cast_unsigned();
         };
-        if unsafe {
-            fetchstr(
-                uarg,
-                arg.as_mut_ptr().cast(),
-                crate::riscv::PGSIZE.try_into().unwrap(),
-            )
-        } < 0
-        {
+        if super::fetchstr(uarg, arg.as_bytes_mut()).is_err() {
             return (-1i64).cast_unsigned();
         }
         unsafe {
