@@ -67,7 +67,7 @@ pub(super) unsafe extern "C" fn dup() -> u64 {
     if fd < 0 {
         return (-1i64).cast_unsigned();
     }
-    unsafe { crate::sys::filedup(f) };
+    crate::file::dup(f);
     fd.cast_unsigned().into()
 }
 

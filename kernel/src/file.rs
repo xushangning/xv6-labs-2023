@@ -77,6 +77,19 @@ pub(super) fn alloc() -> Option<NonNull<File>> {
     None
 }
 
+/// Increment ref count for file f.
+pub(super) fn dup(f: *mut File) -> *mut File {
+    let p = &raw mut ftable;
+    unsafe {
+        crate::sys::acquire(&raw mut (*p).lock);
+        let f = f.as_mut().unwrap();
+        assert!(f.ref_ >= 1, "filedup");
+        f.ref_ += 1;
+        crate::sys::release(&raw mut (*p).lock);
+    }
+    f
+}
+
 /// Close file f. (Decrement ref count, close when reaches 0.)
 pub(super) fn close(f: *mut File) {
     let p = &raw mut ftable;
