@@ -351,9 +351,7 @@ pub(super) fn exit(status: c_int) -> ! {
     // Close all open files.
     for of in &mut p.ofile {
         if !of.is_null() {
-            unsafe {
-                crate::sys::fileclose(*of);
-            }
+            crate::file::close(*of);
             *of = ptr::null_mut();
         }
     }

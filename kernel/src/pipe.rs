@@ -1,24 +1,31 @@
 use alloc::boxed::Box;
-use core::ffi::{c_char, c_int, c_uint};
+use core::{
+    ffi::{c_char, c_int, c_uint},
+    mem::MaybeUninit,
+    ptr,
+};
 
 use crate::{
     file::{File, FileType},
-    sys::initlock,
+    proc::Condvar,
+    spinlock::Mutex,
 };
 
 #[repr(C)]
-pub struct Pipe {
-    lock: crate::sys::spinlock,
+struct PipeData {
     data: [c_char; 512],
     /// number of bytes read
-    nread: c_uint,
+    nread: Condvar<c_uint>,
     /// number of bytes written
-    nwrite: c_uint,
+    nwrite: Condvar<c_uint>,
     /// read fd is still open
     readopen: c_int,
     /// write fd is still open
     writeopen: c_int,
 }
+
+#[repr(transparent)]
+pub struct Pipe(Mutex<PipeData>);
 
 pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
     let f0 = crate::file::alloc().ok_or(())?.as_ptr();
@@ -28,14 +35,21 @@ pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
     };
     let f1 = f1.as_ptr();
 
-    let mut pi = Box::<Pipe>::try_new_uninit().map_err(|_| ())?;
+    let pi = Box::into_raw(
+        Box::try_new(Pipe(Mutex::new(
+            c"pipe",
+            PipeData {
+                data: [0; _],
+                nread: Condvar::new(0),
+                nwrite: Condvar::new(0),
+                readopen: 1,
+                writeopen: 1,
+            },
+        )))
+        .map_err(|_| ())?,
+    );
+
     unsafe {
-        let pi = pi.as_mut_ptr();
-        (*pi).readopen = 1;
-        (*pi).writeopen = 1;
-        (*pi).nwrite = 0;
-        (*pi).nread = 0;
-        initlock(&mut (*pi).lock, c"pipe".as_ptr().cast_mut());
         (*f0).type_ = FileType::Pipe;
         (*f0).readable = 1;
         (*f0).writable = 0;
@@ -45,6 +59,95 @@ pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
         (*f1).writable = 1;
         (*f1).pipe = pi;
     }
-    _ = Box::into_raw(pi);
     Ok((f0, f1))
+}
+
+pub(super) fn close(pi: &Pipe, writable: bool) {
+    let both_closed = {
+        let mut pi = pi.0.lock();
+        if writable {
+            pi.writeopen = 0;
+            pi.nread.notify_all();
+        } else {
+            pi.readopen = 0;
+            pi.nwrite.notify_all();
+        }
+        pi.readopen == 0 && pi.writeopen == 0
+    };
+    if both_closed {
+        unsafe { drop(Box::from_raw((ptr::from_ref(pi)).cast_mut())) };
+    }
+}
+
+pub(super) fn write(pi: &Pipe, addr: u64, n: c_int) -> c_int {
+    let pr = unsafe { crate::sys::myproc() };
+    let mut pi = pi.0.lock();
+    let mut i: c_int = 0;
+
+    while i < n {
+        if pi.readopen == 0 || unsafe { crate::sys::killed(pr) } != 0 {
+            return -1;
+        }
+        //DOC: pipewrite-full
+        if pi.nwrite.0 == pi.nread.0 + (pi.data.len() as u32) {
+            pi.nread.notify_all();
+            let chan: *const Condvar<u32> = ptr::from_ref(&pi.nwrite);
+            pi = Condvar::wait(chan, pi);
+        } else {
+            let mut ch = MaybeUninit::uninit();
+            if unsafe {
+                crate::sys::copyin(
+                    (*pr).pagetable.as_mut().unwrap().as_mut(),
+                    ch.as_mut_ptr(),
+                    addr + i as u64,
+                    1,
+                )
+            } == -1
+            {
+                break;
+            }
+            let idx = pi.nwrite.0 as usize % pi.data.len();
+            pi.data[idx] = unsafe { ch.assume_init() };
+            pi.nwrite.0 += 1;
+            i += 1;
+        }
+    }
+    pi.nread.notify_all();
+
+    i
+}
+
+pub(super) fn read(pi: &Pipe, addr: u64, n: c_int) -> c_int {
+    let pr = unsafe { crate::sys::myproc() };
+
+    let mut pi = pi.0.lock();
+    //DOC: pipe-empty
+    while pi.nread.0 == pi.nwrite.0 && pi.writeopen != 0 {
+        if unsafe { crate::sys::killed(pr) } != 0 {
+            return -1;
+        }
+        pi = Condvar::wait(&raw const pi.nread, pi); //DOC: piperead-sleep
+    }
+    let mut i: c_int = 0;
+    while i < n {
+        //DOC: piperead-copy
+        if pi.nread.0 == pi.nwrite.0 {
+            break;
+        }
+        let ch = pi.data[pi.nread.0 as usize % pi.data.len()];
+        pi.nread.0 += 1;
+        if unsafe {
+            crate::vm::copyout(
+                (*pr).pagetable.as_mut().unwrap().as_mut(),
+                addr as usize + i as usize,
+                bytemuck::bytes_of(&ch),
+            )
+            .is_err()
+        } {
+            break;
+        }
+        i += 1;
+    }
+    pi.nwrite.notify_all(); //DOC: piperead-wakeup
+    i
 }

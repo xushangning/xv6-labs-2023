@@ -45,7 +45,8 @@ OBJS_KCSAN = \
   $K/src/console.rs \
   $K/printf.o \
   $K/uart.o \
-  $K/spinlock.o
+  $K/spinlock.o \
+  $K/src/spinlock.rs
 
 ifdef KCSAN
 OBJS_KCSAN += \

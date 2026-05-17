@@ -94,7 +94,9 @@ pub(super) fn close(f: *mut File) {
 impl Drop for File {
     fn drop(&mut self) {
         match self.type_ {
-            FileType::Pipe => unsafe { crate::sys::pipeclose(self.pipe, self.writable.into()) },
+            FileType::Pipe => {
+                crate::pipe::close(unsafe { self.pipe.as_ref().unwrap() }, self.writable != 0)
+            }
             FileType::Inode | FileType::Device => {
                 let _op_guard = OpGuard::new();
                 unsafe { crate::sys::iput(self.ip) };
@@ -112,7 +114,7 @@ impl File {
             return -1;
         }
         match self.type_ {
-            FileType::Pipe => unsafe { crate::sys::piperead(self.pipe, addr, n) },
+            FileType::Pipe => crate::pipe::read(unsafe { &*self.pipe }, addr, n),
             FileType::Device => {
                 let Ok(major) = usize::try_from(self.major) else {
                     return -1;
@@ -145,7 +147,7 @@ impl File {
             return -1;
         }
         match self.type_ {
-            FileType::Pipe => unsafe { crate::sys::pipewrite(self.pipe, addr, n) },
+            FileType::Pipe => crate::pipe::write(unsafe { &*self.pipe }, addr, n),
             FileType::Device => {
                 let Ok(major) = usize::try_from(self.major) else {
                     return -1;
