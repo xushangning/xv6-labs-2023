@@ -58,7 +58,6 @@ extern "C" fn main() {
             sys::plicinithart(); // ask PLIC for device interrupts
             sys::binit(); // buffer cache
             sys::iinit(); // inode table
-            sys::fileinit(); // file table
             sys::virtio_disk_init(); // emulated hard disk
             proc::userinit(); // first user process
             STARTED.store(true, Ordering::Release);

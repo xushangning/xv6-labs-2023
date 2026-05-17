@@ -9,6 +9,7 @@ use core::{
 use crate::{
     log::OpGuard,
     param::{NDEV, NFILE},
+    spinlock::Mutex,
 };
 
 pub(super) trait Device {
@@ -38,16 +39,6 @@ pub enum FileType {
 }
 
 #[repr(C)]
-struct Ftable {
-    lock: crate::sys::spinlock,
-    file: [File; NFILE],
-}
-
-unsafe extern "C" {
-    static mut ftable: Ftable;
-}
-
-#[repr(C)]
 #[derive(Default)]
 pub struct File {
     pub type_: FileType,
@@ -60,53 +51,43 @@ pub struct File {
     pub major: c_short,
 }
 
+unsafe impl Send for File {}
+
+static FTABLE: Mutex<[File; NFILE]> =
+    Mutex::new(c"ftable", [const { unsafe { mem::zeroed() } }; _]);
+
 /// Allocate a file structure.
 pub(super) fn alloc() -> Option<NonNull<File>> {
-    let p = &raw mut ftable;
-    unsafe {
-        crate::sys::acquire(&raw mut (*p).lock);
-        for f in &mut (*p).file {
-            if f.ref_ == 0 {
-                f.ref_ = 1;
-                crate::sys::release(&raw mut (*p).lock);
-                return Some(NonNull::from_mut(f));
-            }
+    for f in FTABLE.lock().iter_mut() {
+        if f.ref_ == 0 {
+            f.ref_ = 1;
+            return Some(NonNull::from_mut(f));
         }
-        crate::sys::release(&raw mut (*p).lock);
     }
     None
 }
 
 /// Increment ref count for file f.
 pub(super) fn dup(f: *mut File) -> *mut File {
-    let p = &raw mut ftable;
-    unsafe {
-        crate::sys::acquire(&raw mut (*p).lock);
-        let f = f.as_mut().unwrap();
-        assert!(f.ref_ >= 1, "filedup");
-        f.ref_ += 1;
-        crate::sys::release(&raw mut (*p).lock);
-    }
+    let _guard = FTABLE.lock();
+    let f = unsafe { f.as_mut().unwrap() };
+    assert!(f.ref_ >= 1, "filedup");
+    f.ref_ += 1;
     f
 }
 
 /// Close file f. (Decrement ref count, close when reaches 0.)
 pub(super) fn close(f: *mut File) {
-    let p = &raw mut ftable;
-    let ff = unsafe {
-        crate::sys::acquire(&raw mut (*p).lock);
-        let f = f.as_mut().unwrap();
+    let ff = {
+        let _guard = FTABLE.lock();
+        let f = unsafe { f.as_mut().unwrap() };
         assert!(f.ref_ >= 1, "fileclose");
         f.ref_ -= 1;
         if f.ref_ > 0 {
-            crate::sys::release(&raw mut (*p).lock);
             return;
         }
-        let ff = mem::take(f);
-        crate::sys::release(&raw mut (*p).lock);
-        ff
+        mem::take(f)
     };
-
     drop(ff);
 }
 
