@@ -19,9 +19,9 @@ struct PipeData {
     /// number of bytes written
     nwrite: Condvar<c_uint>,
     /// read fd is still open
-    readopen: c_int,
+    readopen: bool,
     /// write fd is still open
-    writeopen: c_int,
+    writeopen: bool,
 }
 
 #[repr(transparent)]
@@ -42,8 +42,8 @@ pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
                 data: [0; _],
                 nread: Condvar::new(0),
                 nwrite: Condvar::new(0),
-                readopen: 1,
-                writeopen: 1,
+                readopen: true,
+                writeopen: true,
             },
         )))
         .map_err(|_| ())?,
@@ -66,13 +66,13 @@ pub(super) fn close(pi: &Pipe, writable: bool) {
     let both_closed = {
         let mut pi = pi.0.lock();
         if writable {
-            pi.writeopen = 0;
+            pi.writeopen = false;
             pi.nread.notify_all();
         } else {
-            pi.readopen = 0;
+            pi.readopen = false;
             pi.nwrite.notify_all();
         }
-        pi.readopen == 0 && pi.writeopen == 0
+        !pi.readopen && !pi.writeopen
     };
     if both_closed {
         unsafe { drop(Box::from_raw((ptr::from_ref(pi)).cast_mut())) };
@@ -85,7 +85,7 @@ pub(super) fn write(pi: &Pipe, addr: u64, n: c_int) -> c_int {
     let mut i: c_int = 0;
 
     while i < n {
-        if pi.readopen == 0 || unsafe { crate::sys::killed(pr) } != 0 {
+        if !pi.readopen || unsafe { crate::sys::killed(pr) } != 0 {
             return -1;
         }
         //DOC: pipewrite-full
@@ -122,7 +122,7 @@ pub(super) fn read(pi: &Pipe, addr: u64, n: c_int) -> c_int {
 
     let mut pi = pi.0.lock();
     //DOC: pipe-empty
-    while pi.nread.0 == pi.nwrite.0 && pi.writeopen != 0 {
+    while pi.nread.0 == pi.nwrite.0 && pi.writeopen {
         if unsafe { crate::sys::killed(pr) } != 0 {
             return -1;
         }
