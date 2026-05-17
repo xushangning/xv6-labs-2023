@@ -2,8 +2,9 @@
 
 use core::{
     ffi::{c_char, c_int, c_short, c_uint},
-    mem,
+    mem::{self, MaybeUninit},
     ptr::NonNull,
+    slice,
 };
 
 use crate::{
@@ -107,6 +108,33 @@ impl Drop for File {
 }
 
 impl File {
+    /// Get metadata about file f.
+    /// addr is a user virtual address, pointing to a struct stat.
+    pub(super) fn stat(&self, addr: usize) -> Result<(), ()> {
+        match self.type_ {
+            FileType::Inode | FileType::Device => {
+                let mut st = MaybeUninit::<crate::sys::stat>::uninit();
+                unsafe {
+                    crate::sys::ilock(self.ip);
+                    crate::sys::stati(self.ip, st.as_mut_ptr());
+                    crate::sys::iunlock(self.ip);
+                }
+                let p = unsafe { crate::sys::myproc() };
+                unsafe {
+                    crate::vm::copyout(
+                        (*p).pagetable.as_mut().unwrap().as_mut(),
+                        addr,
+                        slice::from_raw_parts(
+                            st.as_mut_ptr().cast(),
+                            mem::size_of::<crate::sys::stat>(),
+                        ),
+                    )
+                }
+            }
+            _ => Err(()),
+        }
+    }
+
     /// Read from file f.
     /// addr is a user virtual address.
     pub(super) fn read(&mut self, addr: u64, n: c_int) -> c_int {

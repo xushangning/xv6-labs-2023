@@ -188,6 +188,20 @@ pub(super) unsafe extern "C" fn close() -> u64 {
     0
 }
 
+pub(super) unsafe extern "C" fn fstat() -> u64 {
+    let st = unsafe { super::argaddr(1) }; // user pointer to struct stat
+    let mut f = ptr::null_mut();
+    if argfd(0, None, Some(&mut f)) < 0 {
+        return (-1i64).cast_unsigned();
+    }
+    unsafe {
+        match (*f).stat(st) {
+            Ok(_) => 0,
+            Err(_) => (-1i64).cast_unsigned(),
+        }
+    }
+}
+
 pub(super) unsafe extern "C" fn exec() -> u64 {
     use crate::param::MAXPATH;
 

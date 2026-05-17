@@ -46,6 +46,17 @@ unsafe fn argint(n: c_int) -> c_int {
     }
 }
 
+/// Retrieve an argument as a pointer.
+/// Doesn't check for legality, since
+/// copyin/copyout will do that.
+unsafe fn argaddr(n: c_int) -> usize {
+    unsafe {
+        let mut i = MaybeUninit::<usize>::uninit();
+        crate::sys::argaddr(n, i.as_mut_ptr().cast());
+        i.assume_init()
+    }
+}
+
 /// Fetch the nth word-sized system call argument as a null-terminated string.
 /// Copies into buf, at most max.
 /// Returns string length if OK (including nul), -1 if error.
@@ -55,7 +66,6 @@ unsafe fn argstr(n: c_int, buf: &mut [MaybeUninit<c_char>]) -> c_int {
 
 // Prototypes for the functions that handle system calls.
 unsafe extern "C" {
-    fn sys_fstat() -> u64;
     fn sys_chdir() -> u64;
     fn sys_mknod() -> u64;
     fn sys_unlink() -> u64;
@@ -74,7 +84,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(file::read),
     Some(proc::kill),
     Some(file::exec),
-    Some(sys_fstat),
+    Some(file::fstat),
     Some(sys_chdir),
     Some(file::dup),
     Some(proc::getpid),
