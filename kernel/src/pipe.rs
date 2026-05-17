@@ -3,7 +3,7 @@ use core::ffi::{c_char, c_int, c_uint};
 
 use crate::{
     file::{File, FileType},
-    sys::{fileclose, initlock},
+    sys::initlock,
 };
 
 #[repr(C)]
@@ -23,9 +23,7 @@ pub struct Pipe {
 pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
     let f0 = crate::file::alloc().ok_or(())?.as_ptr();
     let Some(f1) = crate::file::alloc() else {
-        unsafe {
-            fileclose(f0);
-        }
+        crate::file::close(f0);
         return Err(());
     };
     let f1 = f1.as_ptr();

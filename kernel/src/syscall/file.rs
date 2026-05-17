@@ -13,7 +13,7 @@ use super::{argint, argstr};
 use crate::{
     file::File,
     kalloc::Page,
-    sys::{NOFILE, argaddr, fileclose, myproc},
+    sys::{NOFILE, argaddr, myproc},
 };
 
 unsafe extern "C" {
@@ -93,7 +93,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         log::OpGuard,
         param::MAXPATH,
         stat::InodeType,
-        sys::{NDEV, fileclose, ilock, itrunc, iunlock, iunlockput, namei},
+        sys::{NDEV, ilock, itrunc, iunlock, iunlockput, namei},
     };
 
     let omode = OMode::from_bits_retain(unsafe { argint(1) });
@@ -136,7 +136,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
 
     let fd = fdalloc(f);
     if fd < 0 {
-        unsafe { fileclose(f) };
+        crate::file::close(f);
         unsafe { iunlockput(ip) };
         return (-1i64).cast_unsigned();
     }
@@ -218,14 +218,14 @@ pub(super) unsafe extern "C" fn pipe() -> u64 {
     let Ok((rf, wf)) = crate::pipe::alloc() else {
         return (-1i64).cast_unsigned();
     };
-    let rf = DropGuard::new(rf, |f: *mut File| unsafe {
+    let rf = DropGuard::new(rf, |f: *mut File| {
         if !f.is_null() {
-            fileclose(f);
+            crate::file::close(f);
         }
     });
-    let wf = DropGuard::new(wf, |f: *mut File| unsafe {
+    let wf = DropGuard::new(wf, |f: *mut File| {
         if !f.is_null() {
-            fileclose(f);
+            crate::file::close(f);
         }
     });
     let p = unsafe { myproc().as_mut().unwrap() };

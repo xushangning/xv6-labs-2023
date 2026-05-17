@@ -2,6 +2,7 @@
 
 use core::{
     ffi::{c_char, c_int, c_short, c_uint},
+    mem,
     ptr::NonNull,
 };
 
@@ -27,8 +28,9 @@ const DEVSW: DevSw = {
 };
 
 #[repr(C)]
-#[allow(dead_code)]
+#[derive(Default)]
 pub enum FileType {
+    #[default]
     None = 0,
     Pipe = 1,
     Inode = 2,
@@ -46,6 +48,7 @@ unsafe extern "C" {
 }
 
 #[repr(C)]
+#[derive(Default)]
 pub struct File {
     pub type_: FileType,
     pub ref_: c_int,
@@ -72,6 +75,39 @@ pub(super) fn alloc() -> Option<NonNull<File>> {
         crate::sys::release(&raw mut (*p).lock);
     }
     None
+}
+
+/// Close file f. (Decrement ref count, close when reaches 0.)
+pub(super) fn close(f: *mut File) {
+    let p = &raw mut ftable;
+    let ff = unsafe {
+        crate::sys::acquire(&raw mut (*p).lock);
+        let f = f.as_mut().unwrap();
+        assert!(f.ref_ >= 1, "fileclose");
+        f.ref_ -= 1;
+        if f.ref_ > 0 {
+            crate::sys::release(&raw mut (*p).lock);
+            return;
+        }
+        let ff = mem::take(f);
+        crate::sys::release(&raw mut (*p).lock);
+        ff
+    };
+
+    drop(ff);
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        match self.type_ {
+            FileType::Pipe => unsafe { crate::sys::pipeclose(self.pipe, self.writable.into()) },
+            FileType::Inode | FileType::Device => {
+                let _op_guard = OpGuard::new();
+                unsafe { crate::sys::iput(self.ip) };
+            }
+            FileType::None => {}
+        }
+    }
 }
 
 impl File {
