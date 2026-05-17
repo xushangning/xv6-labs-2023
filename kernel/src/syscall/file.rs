@@ -164,6 +164,17 @@ pub(super) unsafe extern "C" fn open() -> u64 {
     fd.cast_unsigned().into()
 }
 
+pub(super) unsafe extern "C" fn close() -> u64 {
+    let mut fd: c_int = 0;
+    let mut f = ptr::null_mut();
+    if argfd(0, Some(&mut fd), Some(&mut f)) < 0 {
+        return (-1i64).cast_unsigned();
+    }
+    unsafe { (*myproc()).ofile[usize::try_from(fd).unwrap()] = ptr::null_mut() };
+    crate::file::close(f);
+    0
+}
+
 pub(super) unsafe extern "C" fn exec() -> u64 {
     use crate::param::MAXPATH;
 

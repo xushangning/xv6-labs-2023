@@ -62,7 +62,6 @@ unsafe extern "C" {
     fn sys_unlink() -> u64;
     fn sys_link() -> u64;
     fn sys_mkdir() -> u64;
-    fn sys_close() -> u64;
 }
 
 /// An array mapping syscall numbers from syscall.h
@@ -89,7 +88,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(sys_unlink),
     Some(sys_link),
     Some(sys_mkdir),
-    Some(sys_close),
+    Some(file::close),
 ];
 
 pub(super) unsafe fn syscall() {
