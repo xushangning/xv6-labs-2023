@@ -7,9 +7,9 @@ use core::{
 use crate::{
     fs,
     log::OpGuard,
-    proc::ProcVm,
     riscv::PGSIZE,
     sys::{inode, pagetable_t},
+    vm::ProcVm,
     vm::{PteFlags, Vm},
 };
 
@@ -30,11 +30,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
         program_header::{PT_LOAD, ProgramHeader},
     };
 
-    use crate::{
-        param::MAXARG,
-        riscv::pgroundup,
-        vm::{copyout, uvmalloc},
-    };
+    use crate::{param::MAXARG, riscv::pgroundup, vm::copyout};
 
     let p = unsafe { crate::sys::myproc().as_mut().unwrap() };
 
@@ -102,14 +98,10 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
             if ph.p_vaddr % PGSIZE as u64 != 0 {
                 return Err(());
             }
-            proc_vm.0.sz = unsafe {
-                uvmalloc(
-                    &mut proc_vm.0,
-                    (ph.p_vaddr + ph.p_memsz).try_into().unwrap(),
-                    flags2perm(ph.p_flags),
-                )
-            }?
-            .get();
+            proc_vm.extend_with(
+                (ph.p_vaddr + ph.p_memsz).try_into().unwrap(),
+                flags2perm(ph.p_flags),
+            )?;
             let p_vaddr = usize::try_from(ph.p_vaddr).unwrap();
             let p_filesz = usize::try_from(ph.p_filesz).unwrap();
             unsafe {
@@ -132,7 +124,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
     // Use the second as the user stack.
     proc_vm.0.sz = pgroundup(proc_vm.0.sz);
     let newsz = proc_vm.0.sz + 2 * PGSIZE;
-    proc_vm.0.sz = unsafe { uvmalloc(&mut proc_vm.0, newsz, PteFlags::W) }?.get();
+    proc_vm.extend_with(newsz, PteFlags::W)?;
     unsafe {
         crate::sys::uvmclear(
             proc_vm.0.pagetable.as_mut(),

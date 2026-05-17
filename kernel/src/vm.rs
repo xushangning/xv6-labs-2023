@@ -1,7 +1,6 @@
 use alloc::{alloc::AllocError, boxed::Box};
 use core::{
-    mem,
-    num::NonZero,
+    mem::{self, DropGuard},
     ops::{Deref, DerefMut, Range},
     ptr,
 };
@@ -191,25 +190,50 @@ pub(super) fn uvmfirst(pagetable: &mut PageTable, src: &[u8]) {
     }
 }
 
-/// Allocate PTEs and physical memory to grow process from oldsz to
-/// newsz, which need not be page aligned.  Returns new size or 0 on error.
-pub(super) unsafe fn uvmalloc(
-    vm: &mut Vm,
-    newsz: usize,
-    xperm: PteFlags,
-) -> Result<NonZero<usize>, ()> {
-    NonZero::new(
-        usize::try_from(unsafe {
-            crate::sys::uvmalloc(
-                vm.pagetable.as_mut(),
-                vm.sz.try_into().unwrap(),
-                newsz.try_into().unwrap(),
-                xperm.bits().try_into().unwrap(),
-            )
-        })
-        .unwrap(),
-    )
-    .ok_or(())
+#[repr(transparent)]
+pub(super) struct ProcVm(pub(super) Vm);
+
+impl ProcVm {
+    /// Allocate PTEs and physical memory to grow process from oldsz to
+    /// newsz, which need not be page aligned.  Returns new size or 0 on error.
+    pub(super) fn extend_with(&mut self, newsz: usize, xperm: PteFlags) -> Result<(), ()> {
+        use crate::riscv::pgroundup;
+
+        if newsz < self.0.sz {
+            return Ok(());
+        }
+
+        let oldsz = pgroundup(self.0.sz);
+        for a in (oldsz..newsz).step_by(PGSIZE) {
+            let mut this = DropGuard::new(&mut *self, |this| unsafe {
+                uvmdealloc(this, oldsz);
+                this.0.sz = oldsz;
+            });
+            let mem = Box::<Page>::try_new_zeroed().map_err(|_| ())?;
+            this.0.pagetable.insert(
+                a..a + PGSIZE,
+                mem.as_ptr(),
+                PteFlags::R | PteFlags::U | xperm,
+            )?;
+            this.0.sz = a;
+            _ = Box::leak(mem);
+            DropGuard::dismiss(this);
+        }
+        self.0.sz = newsz;
+        Ok(())
+    }
+}
+
+pub(super) unsafe fn uvmdealloc(vm: &mut ProcVm, newsz: usize) -> usize {
+    unsafe {
+        crate::sys::uvmdealloc(
+            vm.0.pagetable.as_mut(),
+            vm.0.sz.try_into().unwrap(),
+            newsz.try_into().unwrap(),
+        )
+        .try_into()
+        .unwrap()
+    }
 }
 
 impl Drop for PageTableLevel {

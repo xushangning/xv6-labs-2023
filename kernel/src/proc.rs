@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
-    mem::{self, ManuallyDrop, MaybeUninit},
+    mem::{self, DropGuard, ManuallyDrop, MaybeUninit},
     ptr,
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
@@ -14,7 +14,7 @@ use crate::{
         acquire, myproc, procstate_RUNNABLE, procstate_SLEEPING, procstate_UNUSED,
         procstate_ZOMBIE, release, safestrcpy, spinlock, wakeup,
     },
-    vm::{PageTable, PteFlags, Vm},
+    vm::{PageTable, ProcVm, PteFlags, Vm},
 };
 
 #[repr(C)]
@@ -129,9 +129,6 @@ impl Drop for Proc {
     }
 }
 
-#[repr(transparent)]
-pub(super) struct ProcVm(pub(super) Vm);
-
 impl ProcVm {
     /// Create a user page table for a given process, with no user memory,
     /// but with trampoline and trapframe pages.
@@ -224,23 +221,26 @@ pub(super) fn userinit() {
 /// Grow or shrink user memory by n bytes.
 /// Return 0 on success, -1 on failure.
 pub(super) fn growproc(n: c_int) -> c_int {
-    use crate::sys::{PTE_W, uvmalloc, uvmdealloc};
+    use crate::sys::uvmdealloc;
 
     let p = unsafe { myproc().as_mut().unwrap() };
 
     let mut sz = p.sz;
     if n > 0 {
-        sz = unsafe {
-            uvmalloc(
-                p.pagetable.as_mut().unwrap().as_mut(),
-                sz,
-                sz.wrapping_add(n as u64),
-                PTE_W.cast_signed(),
-            )
-        };
-        if sz == 0 {
+        let mut vm = DropGuard::new(
+            ProcVm(Vm {
+                pagetable: p.pagetable.take().unwrap(),
+                sz: p.sz.try_into().unwrap(),
+            }),
+            |vm| p.pagetable = Some(vm.leak()),
+        );
+        if vm
+            .extend_with(sz as usize + n as usize, PteFlags::W)
+            .is_err()
+        {
             return -1;
         }
+        sz = vm.0.sz.try_into().unwrap();
     } else if n < 0 {
         sz = unsafe {
             uvmdealloc(
