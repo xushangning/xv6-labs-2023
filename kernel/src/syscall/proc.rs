@@ -1,11 +1,7 @@
-use core::mem::MaybeUninit;
-
 use crate::{proc::Condvar, sys::myproc, trap::TICKS};
 
 pub(super) unsafe extern "C" fn exit() -> u64 {
-    let mut n = MaybeUninit::uninit();
-    unsafe { crate::sys::argint(0, n.as_mut_ptr()) };
-    crate::proc::exit(unsafe { n.assume_init() })
+    crate::proc::exit(unsafe { super::argint(0) })
 }
 
 pub(super) unsafe extern "C" fn getpid() -> u64 {
@@ -17,17 +13,14 @@ pub(super) unsafe extern "C" fn fork() -> u64 {
 }
 
 pub(super) unsafe extern "C" fn wait() -> u64 {
-    let mut p: u64 = 0;
-    unsafe { crate::sys::argaddr(0, &mut p) };
-    crate::proc::wait(p).cast_unsigned().into()
+    crate::proc::wait(unsafe { super::argaddr(0) })
+        .cast_unsigned()
+        .into()
 }
 
 pub(super) unsafe extern "C" fn sbrk() -> u64 {
-    let mut n = MaybeUninit::uninit();
-
-    unsafe { crate::sys::argint(0, n.as_mut_ptr()) };
     let addr = unsafe { (*myproc()).sz };
-    if crate::proc::growproc(unsafe { n.assume_init() }) < 0 {
+    if crate::proc::growproc(unsafe { super::argint(0) }) < 0 {
         return (-1i64).cast_unsigned();
     }
     addr
@@ -39,13 +32,7 @@ pub(super) unsafe extern "C" fn sbrk() -> u64 {
 pub(super) unsafe extern "C" fn sleep() -> u64 {
     use crate::sys::killed;
 
-    let mut n = {
-        let mut n = MaybeUninit::uninit();
-        unsafe {
-            crate::sys::argint(0, n.as_mut_ptr());
-            n.assume_init()
-        }
-    };
+    let mut n = unsafe { super::argint(0) };
     if n < 0 {
         n = 0;
     }
@@ -63,9 +50,7 @@ pub(super) unsafe extern "C" fn sleep() -> u64 {
 }
 
 pub(super) unsafe extern "C" fn kill() -> u64 {
-    let mut pid = MaybeUninit::uninit();
-    unsafe { crate::sys::argint(0, pid.as_mut_ptr()) };
-    crate::proc::kill(unsafe { pid.assume_init() })
+    crate::proc::kill(unsafe { super::argint(0) })
         .cast_unsigned()
         .into()
 }

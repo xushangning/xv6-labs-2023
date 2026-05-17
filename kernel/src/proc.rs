@@ -385,7 +385,7 @@ pub(super) fn exit(status: c_int) -> ! {
 
 /// Wait for a child process to exit and return its pid.
 /// Return -1 if this process has no children.
-pub(super) fn wait(addr: u64) -> c_int {
+pub(super) fn wait(addr: usize) -> c_int {
     use crate::sys::{killed, sleep};
 
     let p = unsafe { myproc().as_mut().unwrap() };
@@ -408,7 +408,7 @@ pub(super) fn wait(addr: u64) -> c_int {
                         if addr != 0
                             && crate::vm::copyout(
                                 p.pagetable.as_mut().unwrap().as_mut(),
-                                addr.try_into().unwrap(),
+                                addr,
                                 bytemuck::bytes_of(&pp.xstate),
                             )
                             .is_err()
