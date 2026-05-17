@@ -220,38 +220,22 @@ pub(super) fn userinit() {
 
 /// Grow or shrink user memory by n bytes.
 /// Return 0 on success, -1 on failure.
-pub(super) fn growproc(n: c_int) -> c_int {
-    use crate::sys::uvmdealloc;
-
+pub(super) fn growproc(n: isize) -> Result<(), ()> {
     let p = unsafe { myproc().as_mut().unwrap() };
 
-    let mut sz = p.sz;
-    if n > 0 {
-        let mut vm = DropGuard::new(
-            ProcVm(Vm {
-                pagetable: p.pagetable.take().unwrap(),
-                sz: p.sz.try_into().unwrap(),
-            }),
-            |vm| p.pagetable = Some(vm.leak()),
-        );
-        if vm
-            .extend_with(sz as usize + n as usize, PteFlags::W)
-            .is_err()
-        {
-            return -1;
-        }
-        sz = vm.0.sz.try_into().unwrap();
-    } else if n < 0 {
-        sz = unsafe {
-            uvmdealloc(
-                p.pagetable.as_mut().unwrap().as_mut(),
-                sz,
-                sz.wrapping_sub((-n) as u64),
-            )
-        };
-    }
-    p.sz = sz;
-    0
+    let mut vm = DropGuard::new(
+        ProcVm(Vm {
+            pagetable: p.pagetable.take().unwrap(),
+            sz: p.sz.try_into().unwrap(),
+        }),
+        |vm| {
+            p.sz = vm.0.sz.try_into().unwrap();
+            p.pagetable = Some(vm.leak());
+        },
+    );
+    let sz = vm.0.sz.checked_add_signed(n).unwrap();
+    vm.resize(sz, PteFlags::W)?;
+    Ok(())
 }
 
 /// Create a new process, copying the parent.

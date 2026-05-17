@@ -205,10 +205,7 @@ impl ProcVm {
 
         let oldsz = pgroundup(self.0.sz);
         for a in (oldsz..newsz).step_by(PGSIZE) {
-            let mut this = DropGuard::new(&mut *self, |this| unsafe {
-                uvmdealloc(this, oldsz);
-                this.0.sz = oldsz;
-            });
+            let mut this = DropGuard::new(&mut *self, |this| this.truncate(oldsz));
             let mem = Box::<Page>::try_new_zeroed().map_err(|_| ())?;
             this.0.pagetable.insert(
                 a..a + PGSIZE,
@@ -222,17 +219,29 @@ impl ProcVm {
         self.0.sz = newsz;
         Ok(())
     }
-}
 
-pub(super) unsafe fn uvmdealloc(vm: &mut ProcVm, newsz: usize) -> usize {
-    unsafe {
-        crate::sys::uvmdealloc(
-            vm.0.pagetable.as_mut(),
-            vm.0.sz.try_into().unwrap(),
-            newsz.try_into().unwrap(),
-        )
-        .try_into()
-        .unwrap()
+    /// Deallocate user pages to bring the process size from oldsz to
+    /// newsz.  oldsz and newsz need not be page-aligned, nor does newsz
+    /// need to be less than oldsz.  oldsz can be larger than the actual
+    /// process size.  Returns the new process size.
+    pub(super) fn truncate(&mut self, newsz: usize) {
+        use crate::riscv::pgroundup;
+
+        if newsz >= self.0.sz {
+            return;
+        }
+
+        self.0.pagetable.remove(pgroundup(newsz)..self.0.sz, true);
+        self.0.sz = newsz;
+    }
+
+    pub(super) fn resize(&mut self, newsz: usize, xperm: PteFlags) -> Result<(), ()> {
+        if newsz > self.0.sz {
+            self.extend_with(newsz, xperm)?;
+        } else if newsz < self.0.sz {
+            self.truncate(newsz);
+        }
+        Ok(())
     }
 }
 

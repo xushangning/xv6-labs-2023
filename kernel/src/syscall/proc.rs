@@ -20,7 +20,7 @@ pub(super) unsafe extern "C" fn wait() -> u64 {
 
 pub(super) unsafe extern "C" fn sbrk() -> u64 {
     let addr = unsafe { (*myproc()).sz };
-    if crate::proc::growproc(unsafe { super::argint(0) }) < 0 {
+    if crate::proc::growproc(unsafe { super::argint(0).try_into().unwrap() }).is_err() {
         return (-1i64).cast_unsigned();
     }
     addr
