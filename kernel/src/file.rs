@@ -1,7 +1,7 @@
 //! Support functions for system calls that involve file descriptors.
 
 use core::{
-    ffi::{c_char, c_int, c_short, c_uint},
+    ffi::{c_int, c_short, c_uint},
     mem::{self, MaybeUninit},
     ptr::NonNull,
     slice,
@@ -31,25 +31,27 @@ const DEVSW: DevSw = {
 
 #[repr(C)]
 #[derive(Default)]
-pub enum FileType {
+pub enum FileKind {
     #[default]
-    None = 0,
-    Pipe = 1,
-    Inode = 2,
-    Device = 3,
+    None,
+    Pipe(NonNull<crate::pipe::Pipe>),
+    Inode {
+        ip: NonNull<crate::sys::inode>,
+        off: c_uint,
+    },
+    Device {
+        ip: NonNull<crate::sys::inode>,
+        major: c_short,
+    },
 }
 
 #[repr(C)]
 #[derive(Default)]
 pub struct File {
-    pub type_: FileType,
+    pub kind: FileKind,
     pub ref_: c_int,
-    pub readable: c_char,
-    pub writable: c_char,
-    pub pipe: *mut crate::sys::pipe,
-    pub ip: *mut crate::sys::inode,
-    pub off: c_uint,
-    pub major: c_short,
+    pub readable: bool,
+    pub writable: bool,
 }
 
 unsafe impl Send for File {}
@@ -94,15 +96,13 @@ pub(super) fn close(f: *mut File) {
 
 impl Drop for File {
     fn drop(&mut self) {
-        match self.type_ {
-            FileType::Pipe => {
-                crate::pipe::close(unsafe { self.pipe.as_ref().unwrap() }, self.writable != 0)
-            }
-            FileType::Inode | FileType::Device => {
+        match self.kind {
+            FileKind::Pipe(pipe) => crate::pipe::close(unsafe { pipe.as_ref() }, self.writable),
+            FileKind::Inode { ip, .. } | FileKind::Device { ip, .. } => {
                 let _op_guard = OpGuard::new();
-                unsafe { crate::sys::iput(self.ip) };
+                unsafe { crate::sys::iput(ip.as_ptr()) };
             }
-            FileType::None => {}
+            FileKind::None => {}
         }
     }
 }
@@ -111,40 +111,36 @@ impl File {
     /// Get metadata about file f.
     /// addr is a user virtual address, pointing to a struct stat.
     pub(super) fn stat(&self, addr: usize) -> Result<(), ()> {
-        match self.type_ {
-            FileType::Inode | FileType::Device => {
-                let mut st = MaybeUninit::<crate::sys::stat>::uninit();
-                unsafe {
-                    crate::sys::ilock(self.ip);
-                    crate::sys::stati(self.ip, st.as_mut_ptr());
-                    crate::sys::iunlock(self.ip);
-                }
-                let p = unsafe { crate::sys::myproc() };
-                unsafe {
-                    crate::vm::copyout(
-                        (*p).pagetable.as_mut().unwrap().as_mut(),
-                        addr,
-                        slice::from_raw_parts(
-                            st.as_mut_ptr().cast(),
-                            mem::size_of::<crate::sys::stat>(),
-                        ),
-                    )
-                }
-            }
-            _ => Err(()),
+        let ip = match self.kind {
+            FileKind::Inode { ip, .. } | FileKind::Device { ip, .. } => ip,
+            _ => return Err(()),
+        };
+        let mut st = MaybeUninit::<crate::sys::stat>::uninit();
+        unsafe {
+            crate::sys::ilock(ip.as_ptr());
+            crate::sys::stati(ip.as_ptr(), st.as_mut_ptr());
+            crate::sys::iunlock(ip.as_ptr());
+        }
+        let p = unsafe { crate::sys::myproc() };
+        unsafe {
+            crate::vm::copyout(
+                (*p).pagetable.as_mut().unwrap().as_mut(),
+                addr,
+                slice::from_raw_parts(st.as_mut_ptr().cast(), mem::size_of::<crate::sys::stat>()),
+            )
         }
     }
 
     /// Read from file f.
     /// addr is a user virtual address.
     pub(super) fn read(&mut self, addr: u64, n: c_int) -> c_int {
-        if self.readable == 0 {
+        if !self.readable {
             return -1;
         }
-        match self.type_ {
-            FileType::Pipe => crate::pipe::read(unsafe { &*self.pipe }, addr, n),
-            FileType::Device => {
-                let Ok(major) = usize::try_from(self.major) else {
+        match &mut self.kind {
+            FileKind::Pipe(pipe) => crate::pipe::read(unsafe { pipe.as_ref() }, addr, n),
+            FileKind::Device { major, .. } => {
+                let Ok(major) = usize::try_from(*major) else {
                     return -1;
                 };
                 match DEVSW.get(major) {
@@ -155,29 +151,29 @@ impl File {
                     None => -1,
                 }
             }
-            FileType::Inode => unsafe {
-                crate::sys::ilock(self.ip);
-                let r = crate::sys::readi(self.ip, 1, addr, self.off, n.try_into().unwrap());
+            FileKind::Inode { ip, off } => unsafe {
+                crate::sys::ilock(ip.as_ptr());
+                let r = crate::sys::readi(ip.as_ptr(), 1, addr, *off, n.try_into().unwrap());
                 if r > 0 {
-                    self.off += r.cast_unsigned();
+                    *off += r.cast_unsigned();
                 }
-                crate::sys::iunlock(self.ip);
+                crate::sys::iunlock(ip.as_ptr());
                 r
             },
-            FileType::None => panic!("fileread"),
+            FileKind::None => panic!("fileread"),
         }
     }
 
     /// Write to file f.
     /// addr is a user virtual address.
     pub(super) fn write(&mut self, addr: u64, n: c_int) -> c_int {
-        if self.writable == 0 {
+        if !self.writable {
             return -1;
         }
-        match self.type_ {
-            FileType::Pipe => crate::pipe::write(unsafe { &*self.pipe }, addr, n),
-            FileType::Device => {
-                let Ok(major) = usize::try_from(self.major) else {
+        match &mut self.kind {
+            FileKind::Pipe(pipe) => crate::pipe::write(unsafe { pipe.as_ref() }, addr, n),
+            FileKind::Device { major, .. } => {
+                let Ok(major) = usize::try_from(*major) else {
                     return -1;
                 };
                 match DEVSW.get(major) {
@@ -188,7 +184,7 @@ impl File {
                     None => -1,
                 }
             }
-            FileType::Inode => {
+            FileKind::Inode { ip, off } => {
                 // write a few blocks at a time to avoid exceeding
                 // the maximum log transaction size, including
                 // i-node, indirect block, allocation blocks,
@@ -205,18 +201,18 @@ impl File {
                     }
                     let r: c_int = unsafe {
                         let _op_guard = OpGuard::new();
-                        crate::sys::ilock(self.ip);
+                        crate::sys::ilock(ip.as_ptr());
                         let r = crate::sys::writei(
-                            self.ip,
+                            ip.as_ptr(),
                             1,
                             addr + i as u64,
-                            self.off,
+                            *off,
                             n1.try_into().unwrap(),
                         );
                         if r > 0 {
-                            self.off += r.cast_unsigned();
+                            *off += r.cast_unsigned();
                         }
-                        crate::sys::iunlock(self.ip);
+                        crate::sys::iunlock(ip.as_ptr());
                         r
                     };
                     if r != n1 {
@@ -227,7 +223,7 @@ impl File {
                 }
                 if i == n { n } else { -1 }
             }
-            FileType::None => panic!("filewrite"),
+            FileKind::None => panic!("filewrite"),
         }
     }
 }

@@ -6,7 +6,8 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int},
     mem::{DropGuard, MaybeUninit},
-    ptr, slice,
+    ptr::{self, NonNull},
+    slice,
 };
 
 use super::{argint, argstr};
@@ -102,7 +103,7 @@ pub(super) unsafe extern "C" fn write() -> u64 {
 pub(super) unsafe extern "C" fn open() -> u64 {
     use crate::{
         fcntl::OMode,
-        file::FileType,
+        file::FileKind,
         log::OpGuard,
         param::MAXPATH,
         stat::InodeType,
@@ -156,17 +157,14 @@ pub(super) unsafe extern "C" fn open() -> u64 {
 
     match ip.type_ {
         InodeType::Device => {
-            f.type_ = FileType::Device;
-            f.major = ip.major;
+            f.kind = FileKind::Device { ip: NonNull::from_mut(ip), major: ip.major };
         }
         _ => {
-            f.type_ = FileType::Inode;
-            f.off = 0;
+            f.kind = FileKind::Inode { ip: NonNull::from_mut(ip), off: 0 };
         }
     }
-    f.ip = ip;
-    f.readable = (!omode.intersects(OMode::WRONLY)).into();
-    f.writable = omode.intersects(OMode::WRONLY | OMode::RDWR).into();
+    f.readable = !omode.intersects(OMode::WRONLY);
+    f.writable = omode.intersects(OMode::WRONLY | OMode::RDWR);
 
     if omode.intersects(OMode::TRUNC) && matches!(ip.type_, InodeType::File) {
         unsafe { itrunc(ip) };

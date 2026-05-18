@@ -6,7 +6,7 @@ use core::{
 };
 
 use crate::{
-    file::{File, FileType},
+    file::{File, FileKind},
     proc::Condvar,
     spinlock::Mutex,
 };
@@ -35,7 +35,7 @@ pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
     };
     let f1 = f1.as_ptr();
 
-    let pi = Box::into_raw(
+    let pi = Box::into_non_null(
         Box::try_new(Pipe(Mutex::new(
             c"pipe",
             PipeData {
@@ -50,14 +50,12 @@ pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
     );
 
     unsafe {
-        (*f0).type_ = FileType::Pipe;
-        (*f0).readable = 1;
-        (*f0).writable = 0;
-        (*f0).pipe = pi;
-        (*f1).type_ = FileType::Pipe;
-        (*f1).readable = 0;
-        (*f1).writable = 1;
-        (*f1).pipe = pi;
+        (*f0).readable = true;
+        (*f0).writable = false;
+        (*f0).kind = FileKind::Pipe(pi);
+        (*f1).readable = false;
+        (*f1).writable = true;
+        (*f1).kind = FileKind::Pipe(pi);
     }
     Ok((f0, f1))
 }
