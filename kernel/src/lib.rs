@@ -25,6 +25,7 @@ mod param;
 mod pipe;
 mod printf;
 mod proc;
+mod rc;
 mod riscv;
 mod spinlock;
 mod start;

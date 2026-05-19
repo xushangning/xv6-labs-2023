@@ -2,12 +2,14 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
     mem::{self, DropGuard, ManuallyDrop, MaybeUninit},
-    ptr,
+    ptr::{self, NonNull},
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 use crate::{
+    file::File,
     memlayout::{TRAMPOLINE, TRAPFRAME},
+    rc::RcInner,
     riscv::PGSIZE,
     spinlock::MutexGuard,
     sys::{
@@ -31,7 +33,7 @@ pub(super) struct Proc {
     pub pagetable: Option<Box<PageTable>>,
     pub trapframe: Option<Box<MaybeUninit<crate::sys::trapframe>>>,
     pub context: crate::sys::context,
-    pub ofile: [*mut crate::sys::file; 16],
+    pub ofile: [Option<NonNull<RcInner<File>>>; 16],
     pub cwd: *mut crate::sys::inode,
     pub name: [c_char; 16],
 }
@@ -277,8 +279,8 @@ pub(super) fn fork() -> c_int {
 
         // increment reference counts on open file descriptors.
         for i in 0..NOFILE as usize {
-            if !p.ofile[i].is_null() {
-                np.ofile[i] = crate::file::dup(p.ofile[i]);
+            if let Some(of) = p.ofile[i].as_mut() {
+                np.ofile[i] = Some(crate::file::dup(*of));
             }
         }
         np.cwd = idup(p.cwd);
@@ -334,9 +336,8 @@ pub(super) fn exit(status: c_int) -> ! {
 
     // Close all open files.
     for of in &mut p.ofile {
-        if !of.is_null() {
-            crate::file::close(*of);
-            *of = ptr::null_mut();
+        if let Some(f) = of.take() {
+            crate::file::close(f);
         }
     }
 

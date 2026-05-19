@@ -3,6 +3,7 @@
 use core::{
     ffi::{c_int, c_short, c_uint},
     mem::{self, MaybeUninit},
+    ops::DerefMut,
     ptr::NonNull,
     slice,
 };
@@ -10,6 +11,7 @@ use core::{
 use crate::{
     log::OpGuard,
     param::{NDEV, NFILE},
+    rc::RcInner,
     spinlock::Mutex,
 };
 
@@ -49,21 +51,22 @@ pub enum FileKind {
 #[derive(Default)]
 pub struct File {
     pub kind: FileKind,
-    pub ref_: c_int,
     pub readable: bool,
     pub writable: bool,
 }
 
 unsafe impl Send for File {}
 
-static FTABLE: Mutex<[File; NFILE]> =
-    Mutex::new(c"ftable", [const { unsafe { mem::zeroed() } }; _]);
+static FTABLE: Mutex<[RcInner<File>; NFILE]> = Mutex::new(
+    c"ftable",
+    [const { RcInner::new(unsafe { mem::zeroed() }) }; _],
+);
 
 /// Allocate a file structure.
-pub(super) fn alloc() -> Option<NonNull<File>> {
+pub(super) fn alloc() -> Option<NonNull<RcInner<File>>> {
     for f in FTABLE.lock().iter_mut() {
-        if f.ref_ == 0 {
-            f.ref_ = 1;
+        if RcInner::strong(f) == 0 {
+            RcInner::inc_strong(f);
             return Some(NonNull::from_mut(f));
         }
     }
@@ -71,25 +74,27 @@ pub(super) fn alloc() -> Option<NonNull<File>> {
 }
 
 /// Increment ref count for file f.
-pub(super) fn dup(f: *mut File) -> *mut File {
-    let _guard = FTABLE.lock();
-    let f = unsafe { f.as_mut().unwrap() };
-    assert!(f.ref_ >= 1, "filedup");
-    f.ref_ += 1;
+pub(super) fn dup(mut f: NonNull<RcInner<File>>) -> NonNull<RcInner<File>> {
+    {
+        let _guard = FTABLE.lock();
+        let f = unsafe { f.as_mut() };
+        assert!(RcInner::strong(f) >= 1, "filedup");
+        RcInner::inc_strong(f);
+    }
     f
 }
 
 /// Close file f. (Decrement ref count, close when reaches 0.)
-pub(super) fn close(f: *mut File) {
+pub(super) fn close(mut f: NonNull<RcInner<File>>) {
     let ff = {
         let _guard = FTABLE.lock();
-        let f = unsafe { f.as_mut().unwrap() };
-        assert!(f.ref_ >= 1, "fileclose");
-        f.ref_ -= 1;
-        if f.ref_ > 0 {
+        let f = unsafe { f.as_mut() };
+        assert!(RcInner::strong(f) >= 1, "fileclose");
+        RcInner::dec_strong(f);
+        if RcInner::strong(f) > 0 {
             return;
         }
-        mem::take(f)
+        mem::take(f.deref_mut())
     };
     drop(ff);
 }

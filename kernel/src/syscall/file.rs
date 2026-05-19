@@ -6,7 +6,7 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int},
     mem::{DropGuard, MaybeUninit},
-    ptr::{self, NonNull},
+    ptr::NonNull,
     slice,
 };
 
@@ -14,6 +14,7 @@ use super::{argint, argstr};
 use crate::{
     file::File,
     kalloc::Page,
+    rc::RcInner,
     sys::{NOFILE, argaddr, myproc},
 };
 
@@ -28,31 +29,22 @@ unsafe extern "C" {
 
 /// Fetch the nth word-sized system call argument as a file descriptor
 /// and return both the descriptor and the corresponding struct file.
-fn argfd(n: c_int, pfd: Option<&mut c_int>, pf: Option<&mut *mut File>) -> c_int {
+fn argfd(n: c_int) -> Result<(c_int, NonNull<RcInner<File>>), ()> {
     let fd = unsafe { argint(n) };
     if fd < 0 || fd >= NOFILE.try_into().unwrap() {
-        return -1;
+        return Err(());
     }
-    let f = unsafe { (*myproc()).ofile[usize::try_from(fd).unwrap()] };
-    if f.is_null() {
-        return -1;
-    }
-    if let Some(pfd) = pfd {
-        *pfd = fd;
-    }
-    if let Some(pf) = pf {
-        *pf = f;
-    }
-    0
+    let f = unsafe { (*myproc()).ofile[usize::try_from(fd).unwrap()] }.ok_or(())?;
+    Ok((fd, f))
 }
 
 /// Allocate a file descriptor for the given file.
 /// Takes over file reference from caller on success.
-fn fdalloc(f: *mut File) -> c_int {
+fn fdalloc(f: NonNull<RcInner<File>>) -> c_int {
     let p = unsafe { myproc().as_mut().unwrap() };
     for (fd, of) in p.ofile.iter_mut().enumerate() {
-        if of.is_null() {
-            *of = f;
+        if of.is_none() {
+            *of = Some(f);
             return fd.try_into().unwrap();
         }
     }
@@ -60,10 +52,9 @@ fn fdalloc(f: *mut File) -> c_int {
 }
 
 pub(super) unsafe extern "C" fn dup() -> u64 {
-    let mut f = ptr::null_mut();
-    if argfd(0, None, Some(&mut f)) < 0 {
+    let Ok((_, f)) = argfd(0) else {
         return (-1i64).cast_unsigned();
-    }
+    };
     let fd = fdalloc(f);
     if fd < 0 {
         return (-1i64).cast_unsigned();
@@ -79,11 +70,10 @@ pub(super) unsafe extern "C" fn read() -> u64 {
         argaddr(1, p.as_mut_ptr());
     }
     let n = unsafe { argint(2) };
-    let mut f = ptr::null_mut();
-    if argfd(0, None, Some(&mut f)) < 0 {
+    let Ok((_, mut f)) = argfd(0) else {
         return (-1i64).cast_unsigned();
-    }
-    unsafe { (*f).read(p.assume_init(), n).cast_unsigned().into() }
+    };
+    unsafe { f.as_mut().read(p.assume_init(), n).cast_unsigned().into() }
 }
 
 pub(super) unsafe extern "C" fn write() -> u64 {
@@ -93,11 +83,10 @@ pub(super) unsafe extern "C" fn write() -> u64 {
         argaddr(1, p.as_mut_ptr());
     }
     let n = unsafe { argint(2) };
-    let mut f = ptr::null_mut();
-    if argfd(0, None, Some(&mut f)) < 0 {
+    let Ok((_, mut f)) = argfd(0) else {
         return (-1i64).cast_unsigned();
-    }
-    unsafe { (*f).write(p.assume_init(), n).cast_unsigned().into() }
+    };
+    unsafe { f.as_mut().write(p.assume_init(), n).cast_unsigned().into() }
 }
 
 pub(super) unsafe extern "C" fn open() -> u64 {
@@ -146,7 +135,6 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         unsafe { iunlockput(ip) };
         return (-1i64).cast_unsigned();
     };
-    let f = unsafe { f.as_mut() };
 
     let fd = fdalloc(f);
     if fd < 0 {
@@ -155,12 +143,19 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         return (-1i64).cast_unsigned();
     }
 
+    let f = unsafe { f.as_mut() };
     match ip.type_ {
         InodeType::Device => {
-            f.kind = FileKind::Device { ip: NonNull::from_mut(ip), major: ip.major };
+            f.kind = FileKind::Device {
+                ip: NonNull::from_mut(ip),
+                major: ip.major,
+            };
         }
         _ => {
-            f.kind = FileKind::Inode { ip: NonNull::from_mut(ip), off: 0 };
+            f.kind = FileKind::Inode {
+                ip: NonNull::from_mut(ip),
+                off: 0,
+            };
         }
     }
     f.readable = !omode.intersects(OMode::WRONLY);
@@ -176,24 +171,21 @@ pub(super) unsafe extern "C" fn open() -> u64 {
 }
 
 pub(super) unsafe extern "C" fn close() -> u64 {
-    let mut fd: c_int = 0;
-    let mut f = ptr::null_mut();
-    if argfd(0, Some(&mut fd), Some(&mut f)) < 0 {
+    let Ok((fd, f)) = argfd(0) else {
         return (-1i64).cast_unsigned();
-    }
-    unsafe { (*myproc()).ofile[usize::try_from(fd).unwrap()] = ptr::null_mut() };
+    };
+    unsafe { (*myproc()).ofile[usize::try_from(fd).unwrap()] = None };
     crate::file::close(f);
     0
 }
 
 pub(super) unsafe extern "C" fn fstat() -> u64 {
     let st = unsafe { super::argaddr(1) }; // user pointer to struct stat
-    let mut f = ptr::null_mut();
-    if argfd(0, None, Some(&mut f)) < 0 {
+    let Ok((_, mut f)) = argfd(0) else {
         return (-1i64).cast_unsigned();
-    }
+    };
     unsafe {
-        match (*f).stat(st) {
+        match f.as_mut().stat(st) {
             Ok(_) => 0,
             Err(_) => (-1i64).cast_unsigned(),
         }
@@ -254,16 +246,8 @@ pub(super) unsafe extern "C" fn pipe() -> u64 {
     let Ok((rf, wf)) = crate::pipe::alloc() else {
         return (-1i64).cast_unsigned();
     };
-    let rf = DropGuard::new(rf, |f: *mut File| {
-        if !f.is_null() {
-            crate::file::close(f);
-        }
-    });
-    let wf = DropGuard::new(wf, |f: *mut File| {
-        if !f.is_null() {
-            crate::file::close(f);
-        }
-    });
+    let rf = DropGuard::new(rf, crate::file::close);
+    let wf = DropGuard::new(wf, crate::file::close);
     let p = unsafe { myproc().as_mut().unwrap() };
     let mut fd = [-1, -1];
     fd[0] = fdalloc(*rf);
@@ -272,13 +256,13 @@ pub(super) unsafe extern "C" fn pipe() -> u64 {
     }
     fd[1] = fdalloc(*wf);
     if fd[1] < 0 {
-        p.ofile[fd[0] as usize] = ptr::null_mut();
+        p.ofile[fd[0] as usize] = None;
         return (-1i64).cast_unsigned();
     }
     let pt = p.pagetable.as_mut().unwrap().as_mut();
     if unsafe { crate::vm::copyout(pt, fdarray, bytemuck::bytes_of(&fd)).is_err() } {
-        p.ofile[fd[0] as usize] = ptr::null_mut();
-        p.ofile[fd[1] as usize] = ptr::null_mut();
+        p.ofile[fd[0] as usize] = None;
+        p.ofile[fd[1] as usize] = None;
         return (-1i64).cast_unsigned();
     }
     DropGuard::dismiss(rf);

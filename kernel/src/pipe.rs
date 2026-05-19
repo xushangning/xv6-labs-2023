@@ -2,12 +2,14 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_uint},
     mem::MaybeUninit,
-    ptr,
+    ops::DerefMut,
+    ptr::{self, NonNull},
 };
 
 use crate::{
     file::{File, FileKind},
     proc::Condvar,
+    rc::RcInner,
     spinlock::Mutex,
 };
 
@@ -27,13 +29,12 @@ struct PipeData {
 #[repr(transparent)]
 pub struct Pipe(Mutex<PipeData>);
 
-pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
-    let f0 = crate::file::alloc().ok_or(())?.as_ptr();
-    let Some(f1) = crate::file::alloc() else {
+pub(super) fn alloc() -> Result<(NonNull<RcInner<File>>, NonNull<RcInner<File>>), ()> {
+    let mut f0 = crate::file::alloc().ok_or(())?;
+    let Some(mut f1) = crate::file::alloc() else {
         crate::file::close(f0);
         return Err(());
     };
-    let f1 = f1.as_ptr();
 
     let pi = Box::into_non_null(
         Box::try_new(Pipe(Mutex::new(
@@ -50,12 +51,16 @@ pub(super) fn alloc() -> Result<(*mut File, *mut File), ()> {
     );
 
     unsafe {
-        (*f0).readable = true;
-        (*f0).writable = false;
-        (*f0).kind = FileKind::Pipe(pi);
-        (*f1).readable = false;
-        (*f1).writable = true;
-        (*f1).kind = FileKind::Pipe(pi);
+        *f0.as_mut().deref_mut() = File {
+            kind: FileKind::Pipe(pi),
+            readable: true,
+            writable: false,
+        };
+        *f1.as_mut().deref_mut() = File {
+            kind: FileKind::Pipe(pi),
+            readable: false,
+            writable: true,
+        };
     }
     Ok((f0, f1))
 }
