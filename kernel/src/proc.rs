@@ -2,14 +2,14 @@ use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_int, c_void},
     mem::{self, DropGuard, ManuallyDrop, MaybeUninit},
-    ptr::{self, NonNull},
+    ptr,
     sync::atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 use crate::{
     file::File,
     memlayout::{TRAMPOLINE, TRAPFRAME},
-    rc::RcInner,
+    rc::Rc,
     riscv::PGSIZE,
     spinlock::MutexGuard,
     sys::{
@@ -33,7 +33,7 @@ pub(super) struct Proc {
     pub pagetable: Option<Box<PageTable>>,
     pub trapframe: Option<Box<MaybeUninit<crate::sys::trapframe>>>,
     pub context: crate::sys::context,
-    pub ofile: [Option<NonNull<RcInner<File>>>; 16],
+    pub ofile: [Option<Rc<File>>; 16],
     pub cwd: *mut crate::sys::inode,
     pub name: [c_char; 16],
 }
@@ -279,8 +279,8 @@ pub(super) fn fork() -> c_int {
 
         // increment reference counts on open file descriptors.
         for i in 0..NOFILE as usize {
-            if let Some(of) = p.ofile[i].as_mut() {
-                np.ofile[i] = Some(crate::file::dup(*of));
+            if let Some(of) = p.ofile[i].as_ref() {
+                np.ofile[i] = Some(crate::file::dup(of));
             }
         }
         np.cwd = idup(p.cwd);

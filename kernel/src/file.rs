@@ -1,9 +1,9 @@
 //! Support functions for system calls that involve file descriptors.
 
 use core::{
+    cell::Cell,
     ffi::{c_int, c_short, c_uint},
     mem::{self, MaybeUninit},
-    ops::DerefMut,
     ptr::NonNull,
     slice,
 };
@@ -11,7 +11,7 @@ use core::{
 use crate::{
     log::OpGuard,
     param::{NDEV, NFILE},
-    rc::RcInner,
+    rc::{Rc, RcInner, UniqueRc},
     spinlock::Mutex,
 };
 
@@ -39,7 +39,7 @@ pub enum FileKind {
     Pipe(NonNull<crate::pipe::Pipe>),
     Inode {
         ip: NonNull<crate::sys::inode>,
-        off: c_uint,
+        off: Cell<c_uint>,
     },
     Device {
         ip: NonNull<crate::sys::inode>,
@@ -63,38 +63,31 @@ static FTABLE: Mutex<[RcInner<File>; NFILE]> = Mutex::new(
 );
 
 /// Allocate a file structure.
-pub(super) fn alloc() -> Option<NonNull<RcInner<File>>> {
+pub(super) fn alloc() -> Option<UniqueRc<File>> {
     for f in FTABLE.lock().iter_mut() {
-        if RcInner::strong(f) == 0 {
-            RcInner::inc_strong(f);
-            return Some(NonNull::from_mut(f));
+        if f.strong() == 0 {
+            return Some(UniqueRc::new(f));
         }
     }
     None
 }
 
 /// Increment ref count for file f.
-pub(super) fn dup(mut f: NonNull<RcInner<File>>) -> NonNull<RcInner<File>> {
-    {
-        let _guard = FTABLE.lock();
-        let f = unsafe { f.as_mut() };
-        assert!(RcInner::strong(f) >= 1, "filedup");
-        RcInner::inc_strong(f);
-    }
-    f
+pub(super) fn dup(f: &Rc<File>) -> Rc<File> {
+    let _guard = FTABLE.lock();
+    assert!(Rc::strong_count(&f) >= 1, "filedup");
+    f.clone()
 }
 
 /// Close file f. (Decrement ref count, close when reaches 0.)
-pub(super) fn close(mut f: NonNull<RcInner<File>>) {
+pub(super) fn close(mut f: Rc<File>) {
     let ff = {
         let _guard = FTABLE.lock();
-        let f = unsafe { f.as_mut() };
-        assert!(RcInner::strong(f) >= 1, "fileclose");
-        RcInner::dec_strong(f);
-        if RcInner::strong(f) > 0 {
-            return;
+        assert!(Rc::strong_count(&f) >= 1, "fileclose");
+        match Rc::get_mut(&mut f) {
+            Some(f) => mem::take(f),
+            None => return,
         }
-        mem::take(f.deref_mut())
     };
     drop(ff);
 }
@@ -138,11 +131,11 @@ impl File {
 
     /// Read from file f.
     /// addr is a user virtual address.
-    pub(super) fn read(&mut self, addr: u64, n: c_int) -> c_int {
+    pub(super) fn read(&self, addr: u64, n: c_int) -> c_int {
         if !self.readable {
             return -1;
         }
-        match &mut self.kind {
+        match &self.kind {
             FileKind::Pipe(pipe) => crate::pipe::read(unsafe { pipe.as_ref() }, addr, n),
             FileKind::Device { major, .. } => {
                 let Ok(major) = usize::try_from(*major) else {
@@ -158,9 +151,9 @@ impl File {
             }
             FileKind::Inode { ip, off } => unsafe {
                 crate::sys::ilock(ip.as_ptr());
-                let r = crate::sys::readi(ip.as_ptr(), 1, addr, *off, n.try_into().unwrap());
+                let r = crate::sys::readi(ip.as_ptr(), 1, addr, off.get(), n.try_into().unwrap());
                 if r > 0 {
-                    *off += r.cast_unsigned();
+                    off.update(|off| off + r.cast_unsigned());
                 }
                 crate::sys::iunlock(ip.as_ptr());
                 r
@@ -171,11 +164,11 @@ impl File {
 
     /// Write to file f.
     /// addr is a user virtual address.
-    pub(super) fn write(&mut self, addr: u64, n: c_int) -> c_int {
+    pub(super) fn write(&self, addr: u64, n: c_int) -> c_int {
         if !self.writable {
             return -1;
         }
-        match &mut self.kind {
+        match &self.kind {
             FileKind::Pipe(pipe) => crate::pipe::write(unsafe { pipe.as_ref() }, addr, n),
             FileKind::Device { major, .. } => {
                 let Ok(major) = usize::try_from(*major) else {
@@ -211,11 +204,11 @@ impl File {
                             ip.as_ptr(),
                             1,
                             addr + i as u64,
-                            *off,
+                            off.get(),
                             n1.try_into().unwrap(),
                         );
                         if r > 0 {
-                            *off += r.cast_unsigned();
+                            off.update(|off| off + r.cast_unsigned());
                         }
                         crate::sys::iunlock(ip.as_ptr());
                         r
