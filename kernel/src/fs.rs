@@ -63,6 +63,14 @@ impl Inode {
         unsafe { inum / ipb + sb.inodestart }
     }
 
+    // Unlock the given inode.
+    pub unsafe fn unlock(&mut self) {
+        if unsafe { crate::sys::holdingsleep(&mut self.lock) } == 0 || self.ref_ < 1 {
+            panic!("iunlock");
+        }
+        unsafe { crate::sys::releasesleep(&mut self.lock) }
+    }
+
     // Copy stat information from inode.
     // Caller must hold ip->lock.
     pub unsafe fn stat(&mut self, st: *mut crate::sys::stat) {

@@ -117,7 +117,7 @@ impl File {
         unsafe {
             crate::sys::ilock(ip.as_ptr());
             (*ip.as_ptr()).stat(st.as_mut_ptr());
-            crate::sys::iunlock(ip.as_ptr());
+            (*ip.as_ptr()).unlock();
         }
         let p = unsafe { crate::sys::myproc() };
         unsafe {
@@ -155,7 +155,7 @@ impl File {
                 if r > 0 {
                     off.update(|off| off + r.cast_unsigned());
                 }
-                crate::sys::iunlock(ip.as_ptr());
+                (*ip.as_ptr()).unlock();
                 r
             },
             FileKind::None => panic!("fileread"),
@@ -210,7 +210,7 @@ impl File {
                         if r > 0 {
                             off.update(|off| off + r.cast_unsigned());
                         }
-                        crate::sys::iunlock(ip.as_ptr());
+                        (*ip.as_ptr()).unlock();
                         r
                     };
                     if r != n1 {
