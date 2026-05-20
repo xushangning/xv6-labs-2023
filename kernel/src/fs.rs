@@ -22,7 +22,6 @@ unsafe extern "C" {
     static mut sb: crate::sys::superblock;
     fn bfree(dev: c_int, b: c_uint);
     fn bmap(ip: *mut Inode, bn: c_uint) -> c_uint;
-    fn namex(path: *mut c_char, nameiparent: c_int, name: *mut c_char) -> *mut Inode;
 }
 
 /// in-memory copy of an inode
@@ -333,4 +332,113 @@ pub unsafe extern "C" fn idup(ip: *mut Inode) -> *mut Inode {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iput(ip: *mut Inode) {
     unsafe { (*ip).put() }
+}
+
+// Copy the next path element from path into name.
+// Return a pointer past the element, or null if none.
+unsafe fn skipelem(mut path: *const c_char, name: *mut c_char) -> *const c_char {
+    unsafe {
+        while *path == b'/' as c_char {
+            path = path.add(1);
+        }
+        if *path == 0 {
+            return core::ptr::null();
+        }
+        let s = path;
+        while *path != b'/' as c_char && *path != 0 {
+            path = path.add(1);
+        }
+        let len = path.offset_from(s) as usize;
+        if len >= DIRSIZ {
+            core::ptr::copy_nonoverlapping(s, name, DIRSIZ);
+        } else {
+            core::ptr::copy_nonoverlapping(s, name, len);
+            *name.add(len) = 0;
+        }
+        while *path == b'/' as c_char {
+            path = path.add(1);
+        }
+        path
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dirlookup(
+    dp: *mut Inode,
+    name: *mut c_char,
+    poff: *mut c_uint,
+) -> *mut Inode {
+    unsafe {
+        if (*dp).type_ != InodeType::Dir {
+            panic!("dirlookup not DIR");
+        }
+        let de_size = core::mem::size_of::<crate::sys::dirent>();
+        let mut off: u32 = 0;
+        while off < (*dp).size {
+            let mut de = core::mem::MaybeUninit::<crate::sys::dirent>::uninit();
+            if (*dp).read(false, de.as_mut_ptr().addr(), off as usize, de_size) != Ok(de_size) {
+                panic!("dirlookup read");
+            }
+            let de = de.assume_init();
+            if de.inum == 0 {
+                off += de_size as u32;
+                continue;
+            }
+            if crate::sys::namecmp(name.cast_const(), de.name.as_ptr()) == 0 {
+                if !poff.is_null() {
+                    *poff = off;
+                }
+                return iget((*dp).dev, de.inum as c_uint);
+            }
+            off += de_size as u32;
+        }
+        core::ptr::null_mut()
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn namex(
+    path: *mut c_char,
+    nameiparent_flag: c_int,
+    name: *mut c_char,
+) -> *mut Inode {
+    const ROOTDEV: c_uint = 1;
+    const ROOTINO: c_uint = 1;
+
+    unsafe {
+        let mut path: *const c_char = path.cast_const();
+        let mut ip = if *path == b'/' as c_char {
+            iget(ROOTDEV, ROOTINO)
+        } else {
+            (*(*crate::sys::myproc()).cwd).dup()
+        };
+
+        loop {
+            path = skipelem(path, name);
+            if path.is_null() {
+                break;
+            }
+            (*ip).lock();
+            if (*ip).type_ != InodeType::Dir {
+                (*ip).unlock_put();
+                return core::ptr::null_mut();
+            }
+            if nameiparent_flag != 0 && *path == 0 {
+                (*ip).unlock();
+                return ip;
+            }
+            let next = dirlookup(ip, name, core::ptr::null_mut());
+            (*ip).unlock_put();
+            if next.is_null() {
+                return core::ptr::null_mut();
+            }
+            ip = next;
+        }
+
+        if nameiparent_flag != 0 {
+            (*ip).put();
+            return core::ptr::null_mut();
+        }
+        ip
+    }
 }
