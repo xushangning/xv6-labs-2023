@@ -101,7 +101,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         log::OpGuard,
         param::MAXPATH,
         stat::InodeType,
-        sys::{NDEV, ilock, iunlockput, namei},
+        sys::{NDEV, ilock, namei},
     };
 
     let omode = OMode::from_bits_retain(unsafe { argint(1) });
@@ -125,14 +125,14 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         };
         unsafe { ilock(ip) };
         if matches!(ip.type_, InodeType::Dir) && omode != OMode::RDONLY {
-            unsafe { iunlockput(ip) };
+            unsafe { ip.unlock_put() };
             return (-1i64).cast_unsigned();
         }
         ip
     };
 
     if matches!(ip.type_, InodeType::Device) && (ip.major < 0 || ip.major as u32 >= NDEV) {
-        unsafe { iunlockput(ip) };
+        unsafe { ip.unlock_put() };
         return (-1i64).cast_unsigned();
     }
 

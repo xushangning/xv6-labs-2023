@@ -46,7 +46,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
         unsafe {
             crate::sys::ilock(ip);
         }
-        let ip = DropGuard::new(ip, |ip| unsafe { crate::sys::iunlockput(ip) });
+        let ip = DropGuard::new(ip, |ip| unsafe { (*ip).unlock_put() });
 
         // Check ELF header
         let mut elf = MaybeUninit::<Header>::uninit();

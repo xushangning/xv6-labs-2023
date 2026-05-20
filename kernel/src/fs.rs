@@ -71,6 +71,14 @@ impl Inode {
         unsafe { crate::sys::releasesleep(&mut self.lock) }
     }
 
+    // Common idiom: unlock, then put.
+    pub unsafe fn unlock_put(&mut self) {
+        unsafe {
+            self.unlock();
+            self.put();
+        }
+    }
+
     // Drop a reference to an in-memory inode.
     // If that was the last reference, the inode table entry can
     // be recycled.
