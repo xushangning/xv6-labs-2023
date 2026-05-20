@@ -101,7 +101,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         log::OpGuard,
         param::MAXPATH,
         stat::InodeType,
-        sys::{NDEV, ilock, namei},
+        sys::{NDEV, namei},
     };
 
     let omode = OMode::from_bits_retain(unsafe { argint(1) });
@@ -123,7 +123,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         let Some(ip) = (unsafe { namei(path.as_mut_ptr().cast()).as_mut() }) else {
             return (-1i64).cast_unsigned();
         };
-        unsafe { ilock(ip) };
+        unsafe { ip.lock() };
         if matches!(ip.type_, InodeType::Dir) && omode != OMode::RDONLY {
             unsafe { ip.unlock_put() };
             return (-1i64).cast_unsigned();

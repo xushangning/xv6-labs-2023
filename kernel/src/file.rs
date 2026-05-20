@@ -115,7 +115,7 @@ impl File {
         };
         let mut st = MaybeUninit::<crate::sys::stat>::uninit();
         unsafe {
-            crate::sys::ilock(ip.as_ptr());
+            (*ip.as_ptr()).lock();
             (*ip.as_ptr()).stat(st.as_mut_ptr());
             (*ip.as_ptr()).unlock();
         }
@@ -150,7 +150,7 @@ impl File {
                 }
             }
             FileKind::Inode { ip, off } => unsafe {
-                crate::sys::ilock(ip.as_ptr());
+                (*ip.as_ptr()).lock();
                 let r = crate::sys::readi(ip.as_ptr(), 1, addr, off.get(), n.try_into().unwrap());
                 if r > 0 {
                     off.update(|off| off + r.cast_unsigned());
@@ -199,7 +199,7 @@ impl File {
                     }
                     let r: c_int = unsafe {
                         let _op_guard = OpGuard::new();
-                        crate::sys::ilock(ip.as_ptr());
+                        (*ip.as_ptr()).lock();
                         let r = crate::sys::writei(
                             ip.as_ptr(),
                             1,

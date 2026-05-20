@@ -44,7 +44,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
             return Err(());
         }
         unsafe {
-            crate::sys::ilock(ip);
+            (*ip).lock();
         }
         let ip = DropGuard::new(ip, |ip| unsafe { (*ip).unlock_put() });
 

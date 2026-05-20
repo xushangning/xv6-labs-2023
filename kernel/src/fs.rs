@@ -71,6 +71,35 @@ impl Inode {
         unsafe { crate::sys::releasesleep(&mut self.lock) }
     }
 
+    // Lock the given inode.
+    // Reads the inode from disk if necessary.
+    pub unsafe fn lock(&mut self) {
+        if self.ref_ < 1 {
+            panic!("ilock");
+        }
+        unsafe {
+            let ipb = BSIZE / core::mem::size_of::<crate::sys::dinode>();
+            crate::sys::acquiresleep(&mut self.lock);
+            if self.valid == 0 {
+                let bp = crate::sys::bread(self.dev, Self::iblock(self.inum));
+                let dip = ((*bp).data.as_ptr() as *const crate::sys::dinode)
+                    .add(self.inum as usize % ipb);
+                let t = (*dip).type_;
+                self.major = (*dip).major;
+                self.minor = (*dip).minor;
+                self.nlink = (*dip).nlink;
+                self.size = (*dip).size;
+                self.addrs.copy_from_slice(&(*dip).addrs);
+                crate::sys::brelse(bp);
+                self.valid = 1;
+                if t == 0 {
+                    panic!("ilock: no type");
+                }
+                self.type_ = core::mem::transmute(t);
+            }
+        }
+    }
+
     // Increment reference count for ip.
     // Returns ip to enable ip = idup(ip1) idiom.
     pub unsafe fn dup(&mut self) -> *mut Self {
