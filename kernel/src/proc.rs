@@ -343,7 +343,7 @@ pub(super) fn exit(status: c_int) -> ! {
 
     unsafe {
         crate::sys::begin_op();
-        crate::sys::iput(p.cwd);
+        (*p.cwd).put();
         crate::sys::end_op();
         p.cwd = ptr::null_mut();
 

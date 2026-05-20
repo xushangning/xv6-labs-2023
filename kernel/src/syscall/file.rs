@@ -143,7 +143,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
     unsafe { ip.unlock() };
 
     let Some(mut f) = crate::file::alloc() else {
-        unsafe { crate::sys::iput(ip) };
+        unsafe { ip.put() };
         return (-1i64).cast_unsigned();
     };
 

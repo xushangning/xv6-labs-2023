@@ -71,6 +71,33 @@ impl Inode {
         unsafe { crate::sys::releasesleep(&mut self.lock) }
     }
 
+    // Drop a reference to an in-memory inode.
+    // If that was the last reference, the inode table entry can
+    // be recycled.
+    // If that was the last reference and the inode has no links
+    // to it, free the inode (and its content) on disk.
+    // All calls to iput() must be inside a transaction in
+    // case it has to free the inode.
+    pub unsafe fn put(&mut self) {
+        unsafe {
+            let lk = crate::sys::itable_lock();
+            crate::sys::acquire(lk);
+            if self.ref_ == 1 && self.valid != 0 && self.nlink == 0 {
+                // inode has no links and no other references: truncate and free.
+                crate::sys::acquiresleep(&mut self.lock);
+                crate::sys::release(lk);
+                self.trunc();
+                self.type_ = InodeType::Unknown;
+                crate::sys::iupdate(self);
+                self.valid = 0;
+                crate::sys::releasesleep(&mut self.lock);
+                crate::sys::acquire(lk);
+            }
+            self.ref_ -= 1;
+            crate::sys::release(lk);
+        }
+    }
+
     // Truncate inode (discard contents).
     // Caller must hold ip->lock.
     pub unsafe fn trunc(&mut self) {

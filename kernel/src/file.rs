@@ -98,7 +98,7 @@ impl Drop for File {
             FileKind::Pipe(pipe) => crate::pipe::close(unsafe { pipe.as_ref() }, self.writable),
             FileKind::Inode { ip, .. } | FileKind::Device { ip, .. } => {
                 let _op_guard = OpGuard::new();
-                unsafe { crate::sys::iput(ip.as_ptr()) };
+                unsafe { (*ip.as_ptr()).put() };
             }
             FileKind::None => {}
         }
