@@ -243,7 +243,7 @@ pub(super) fn growproc(n: isize) -> Result<(), ()> {
 /// Create a new process, copying the parent.
 /// Sets up child kernel stack to return as if from fork() system call.
 pub(super) fn fork() -> c_int {
-    use crate::sys::{NOFILE, idup, uvmcopy};
+    use crate::sys::{NOFILE, uvmcopy};
 
     let p = unsafe { myproc().as_mut().unwrap() };
 
@@ -283,7 +283,7 @@ pub(super) fn fork() -> c_int {
                 np.ofile[i] = Some(crate::file::dup(of));
             }
         }
-        np.cwd = idup(p.cwd);
+        np.cwd = (*p.cwd).dup();
 
         safestrcpy(
             np.name.as_mut_ptr(),

@@ -71,6 +71,18 @@ impl Inode {
         unsafe { crate::sys::releasesleep(&mut self.lock) }
     }
 
+    // Increment reference count for ip.
+    // Returns ip to enable ip = idup(ip1) idiom.
+    pub unsafe fn dup(&mut self) -> *mut Self {
+        unsafe {
+            let lk = crate::sys::itable_lock();
+            crate::sys::acquire(lk);
+            self.ref_ += 1;
+            crate::sys::release(lk);
+        }
+        self
+    }
+
     // Common idiom: unlock, then put.
     pub unsafe fn unlock_put(&mut self) {
         unsafe {
