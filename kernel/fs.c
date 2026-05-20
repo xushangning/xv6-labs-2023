@@ -88,7 +88,7 @@ balloc(uint dev)
 }
 
 // Free a disk block.
-static void
+void
 bfree(int dev, uint b)
 {
   struct buf *bp;
@@ -376,10 +376,16 @@ iunlockput(struct inode *ip)
 // are listed in ip->addrs[].  The next NINDIRECT blocks are
 // listed in block ip->addrs[NDIRECT].
 
+struct spinlock *
+itable_lock(void)
+{
+  return &itable.lock;
+}
+
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
 // returns 0 if out of disk space.
-static uint
+uint
 bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
@@ -648,7 +654,7 @@ skipelem(char *path, char *name)
 // If parent != 0, return the inode for the parent and copy the final
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
-static struct inode*
+struct inode*
 namex(char *path, int nameiparent, char *name)
 {
   struct inode *ip, *next;

@@ -5,6 +5,7 @@
 #include "sleeplock.h"
 #include "stat.h"
 #include "fs.h"
+#include "buf.h"
 #include "file.h"
 #include "proc.h"
 #include "defs.h"
