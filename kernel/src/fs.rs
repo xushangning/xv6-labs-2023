@@ -7,9 +7,20 @@ const NDIRECT: usize = 12;
 const NINDIRECT: usize = BSIZE / core::mem::size_of::<c_uint>();
 const MAXFILE: usize = NDIRECT + NINDIRECT;
 pub(super) const DIRSIZ: usize = 14;
+const NINODE: usize = 50;
+
+#[repr(C)]
+struct Itable {
+    lock: crate::sys::spinlock,
+    inode: [Inode; NINODE],
+}
 
 unsafe extern "C" {
     static mut sb: crate::sys::superblock;
+    static mut itable: Itable;
+    fn bfree(dev: c_int, b: c_uint);
+    fn bmap(ip: *mut Inode, bn: c_uint) -> c_uint;
+    fn namex(path: *mut c_char, nameiparent: c_int, name: *mut c_char) -> *mut Inode;
 }
 
 /// in-memory copy of an inode
@@ -33,7 +44,6 @@ pub struct Inode {
     pub size: c_uint,
     pub addrs: [c_uint; NDIRECT + 1],
 }
-
 
 impl Inode {
     fn iblock(inum: c_uint) -> c_uint {
@@ -82,10 +92,9 @@ impl Inode {
     // Returns ip to enable ip = idup(ip1) idiom.
     pub unsafe fn dup(&mut self) -> *mut Self {
         unsafe {
-            let lk = crate::sys::itable_lock();
-            crate::sys::acquire(lk);
+            crate::sys::acquire(&raw mut itable.lock);
             self.ref_ += 1;
-            crate::sys::release(lk);
+            crate::sys::release(&raw mut itable.lock);
         }
         self
     }
@@ -107,21 +116,20 @@ impl Inode {
     // case it has to free the inode.
     pub unsafe fn put(&mut self) {
         unsafe {
-            let lk = crate::sys::itable_lock();
-            crate::sys::acquire(lk);
+            crate::sys::acquire(&raw mut itable.lock);
             if self.ref_ == 1 && self.valid != 0 && self.nlink == 0 {
                 // inode has no links and no other references: truncate and free.
                 crate::sys::acquiresleep(&mut self.lock);
-                crate::sys::release(lk);
+                crate::sys::release(&raw mut itable.lock);
                 self.trunc();
                 self.type_ = InodeType::Unknown;
                 crate::sys::iupdate(self);
                 self.valid = 0;
                 crate::sys::releasesleep(&mut self.lock);
-                crate::sys::acquire(lk);
+                crate::sys::acquire(&raw mut itable.lock);
             }
             self.ref_ -= 1;
-            crate::sys::release(lk);
+            crate::sys::release(&raw mut itable.lock);
         }
     }
 
@@ -131,7 +139,7 @@ impl Inode {
         unsafe {
             for i in 0..NDIRECT {
                 if self.addrs[i] != 0 {
-                    crate::sys::bfree(self.dev as c_int, self.addrs[i]);
+                    bfree(self.dev as c_int, self.addrs[i]);
                     self.addrs[i] = 0;
                 }
             }
@@ -141,11 +149,11 @@ impl Inode {
                 for j in 0..NINDIRECT {
                     let addr = *a.add(j);
                     if addr != 0 {
-                        crate::sys::bfree(self.dev as c_int, addr);
+                        bfree(self.dev as c_int, addr);
                     }
                 }
                 crate::sys::brelse(bp);
-                crate::sys::bfree(self.dev as c_int, self.addrs[NDIRECT]);
+                bfree(self.dev as c_int, self.addrs[NDIRECT]);
                 self.addrs[NDIRECT] = 0;
             }
             self.size = 0;
@@ -174,8 +182,7 @@ impl Inode {
         };
         let mut tot = 0;
         while tot < n {
-            let addr =
-                unsafe { crate::sys::bmap(self, (off / BSIZE) as c_uint) };
+            let addr = unsafe { bmap(self, (off / BSIZE) as c_uint) };
             if addr == 0 {
                 break;
             }
@@ -222,8 +229,7 @@ impl Inode {
         }
         let mut tot = 0;
         while tot < n {
-            let addr =
-                unsafe { crate::sys::bmap(self, (off / BSIZE) as c_uint) };
+            let addr = unsafe { bmap(self, (off / BSIZE) as c_uint) };
             if addr == 0 {
                 break;
             }
@@ -261,7 +267,7 @@ impl Inode {
     // Must be called inside a transaction since it calls iput().
     pub unsafe fn namei(path: *mut c_char) -> *mut Self {
         let mut name = [0u8; DIRSIZ];
-        unsafe { crate::sys::namex(path, 0, name.as_mut_ptr().cast()) }
+        unsafe { namex(path, 0, name.as_mut_ptr().cast()) }
     }
 
     // Copy stat information from inode.
