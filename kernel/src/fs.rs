@@ -200,6 +200,63 @@ impl Inode {
         Ok(tot)
     }
 
+    // Write data to inode.
+    // Caller must hold ip->lock.
+    // If user_src==1, then src is a user virtual address;
+    // otherwise, src is a kernel address.
+    // Returns the number of bytes successfully written.
+    // If the return value is less than the requested n,
+    // there was an error of some kind.
+    pub unsafe fn write(
+        &mut self,
+        user_src: bool,
+        mut src: u64,
+        mut off: usize,
+        n: usize,
+    ) -> Result<usize, ()> {
+        if off > self.size as usize || off + n < off {
+            return Err(());
+        }
+        if off + n > MAXFILE * BSIZE {
+            return Err(());
+        }
+        let mut tot = 0;
+        while tot < n {
+            let addr =
+                unsafe { crate::sys::bmap(self, (off / BSIZE) as c_uint) };
+            if addr == 0 {
+                break;
+            }
+            let bp = unsafe { crate::sys::bread(self.dev, addr) };
+            let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
+            let ok = unsafe {
+                crate::sys::either_copyin(
+                    (*bp).data.as_mut_ptr().add(off % BSIZE) as *mut core::ffi::c_void,
+                    user_src as c_int,
+                    src,
+                    m as u64,
+                ) != -1
+            };
+            if ok {
+                unsafe {
+                    crate::sys::log_write(bp);
+                }
+            }
+            unsafe { crate::sys::brelse(bp) };
+            if !ok {
+                break;
+            }
+            tot += m;
+            off += m;
+            src += m as u64;
+        }
+        if off > self.size as usize {
+            self.size = off as c_uint;
+        }
+        unsafe { crate::sys::iupdate(self) };
+        Ok(tot)
+    }
+
     // Copy stat information from inode.
     // Caller must hold ip->lock.
     pub unsafe fn stat(&mut self, st: *mut crate::sys::stat) {

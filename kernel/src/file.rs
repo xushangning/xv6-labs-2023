@@ -207,18 +207,19 @@ impl File {
                     let r: c_int = unsafe {
                         let _op_guard = OpGuard::new();
                         (*ip.as_ptr()).lock();
-                        let r = crate::sys::writei(
-                            ip.as_ptr(),
-                            1,
+                        let r = (*ip.as_ptr()).write(
+                            true,
                             addr + i as u64,
-                            off.get(),
+                            off.get() as usize,
                             n1.try_into().unwrap(),
                         );
-                        if r > 0 {
-                            off.update(|off| off + r.cast_unsigned());
+                        if let Ok(n) = r {
+                            if n > 0 {
+                                off.update(|off| off + n as u32);
+                            }
                         }
                         (*ip.as_ptr()).unlock();
-                        r
+                        r.map(|n| n as c_int).unwrap_or(-1)
                     };
                     if r != n1 {
                         // error from writei
