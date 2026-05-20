@@ -101,7 +101,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
         log::OpGuard,
         param::MAXPATH,
         stat::InodeType,
-        sys::{NDEV, ilock, itrunc, iunlockput, namei},
+        sys::{NDEV, ilock, iunlockput, namei},
     };
 
     let omode = OMode::from_bits_retain(unsafe { argint(1) });
@@ -137,7 +137,7 @@ pub(super) unsafe extern "C" fn open() -> u64 {
     }
 
     if omode.intersects(OMode::TRUNC) && matches!(ip.type_, InodeType::File) {
-        unsafe { itrunc(ip) };
+        unsafe { ip.trunc() };
     }
 
     unsafe { ip.unlock() };

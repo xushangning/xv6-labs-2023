@@ -71,6 +71,34 @@ impl Inode {
         unsafe { crate::sys::releasesleep(&mut self.lock) }
     }
 
+    // Truncate inode (discard contents).
+    // Caller must hold ip->lock.
+    pub unsafe fn trunc(&mut self) {
+        unsafe {
+            for i in 0..NDIRECT {
+                if self.addrs[i] != 0 {
+                    crate::sys::bfree(self.dev as c_int, self.addrs[i]);
+                    self.addrs[i] = 0;
+                }
+            }
+            if self.addrs[NDIRECT] != 0 {
+                let bp = crate::sys::bread(self.dev, self.addrs[NDIRECT]);
+                let a = (*bp).data.as_ptr() as *const c_uint;
+                for j in 0..NINDIRECT {
+                    let addr = *a.add(j);
+                    if addr != 0 {
+                        crate::sys::bfree(self.dev as c_int, addr);
+                    }
+                }
+                crate::sys::brelse(bp);
+                crate::sys::bfree(self.dev as c_int, self.addrs[NDIRECT]);
+                self.addrs[NDIRECT] = 0;
+            }
+            self.size = 0;
+            crate::sys::iupdate(self);
+        }
+    }
+
     // Copy stat information from inode.
     // Caller must hold ip->lock.
     pub unsafe fn stat(&mut self, st: *mut crate::sys::stat) {
