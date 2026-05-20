@@ -173,24 +173,6 @@ bfree(int dev, uint b)
 // dev, and inum.  One must hold ip->lock in order to
 // read or write that inode's ip->valid, ip->size, ip->type, &c.
 
-struct {
-  struct spinlock lock;
-  struct inode inode[NINODE];
-} itable;
-
-void
-iinit()
-{
-  int i = 0;
-  
-  initlock(&itable.lock, "itable");
-  for(i = 0; i < NINODE; i++) {
-    initsleeplock(&itable.inode[i].lock, "inode");
-  }
-}
-
-static struct inode* iget(uint dev, uint inum);
-
 // Allocate an inode on device dev.
 // Mark it as allocated by  giving it type type.
 // Returns an unlocked but allocated and referenced inode,
@@ -240,53 +222,6 @@ iupdate(struct inode *ip)
   brelse(bp);
 }
 
-// Find the inode with number inum on device dev
-// and return the in-memory copy. Does not lock
-// the inode and does not read it from disk.
-static struct inode*
-iget(uint dev, uint inum)
-{
-  struct inode *ip, *empty;
-
-  acquire(&itable.lock);
-
-  // Is the inode already in the table?
-  empty = 0;
-  for(ip = &itable.inode[0]; ip < &itable.inode[NINODE]; ip++){
-    if(ip->ref > 0 && ip->dev == dev && ip->inum == inum){
-      ip->ref++;
-      release(&itable.lock);
-      return ip;
-    }
-    if(empty == 0 && ip->ref == 0)    // Remember empty slot.
-      empty = ip;
-  }
-
-  // Recycle an inode entry.
-  if(empty == 0)
-    panic("iget: no inodes");
-
-  ip = empty;
-  ip->dev = dev;
-  ip->inum = inum;
-  ip->ref = 1;
-  ip->valid = 0;
-  release(&itable.lock);
-
-  return ip;
-}
-
-// Increment reference count for ip.
-// Returns ip to enable ip = idup(ip1) idiom.
-struct inode*
-idup(struct inode *ip)
-{
-  acquire(&itable.lock);
-  ip->ref++;
-  release(&itable.lock);
-  return ip;
-}
-
 // Lock the given inode.
 // Reads the inode from disk if necessary.
 void
@@ -324,41 +259,6 @@ iunlock(struct inode *ip)
     panic("iunlock");
 
   releasesleep(&ip->lock);
-}
-
-// Drop a reference to an in-memory inode.
-// If that was the last reference, the inode table entry can
-// be recycled.
-// If that was the last reference and the inode has no links
-// to it, free the inode (and its content) on disk.
-// All calls to iput() must be inside a transaction in
-// case it has to free the inode.
-void
-iput(struct inode *ip)
-{
-  acquire(&itable.lock);
-
-  if(ip->ref == 1 && ip->valid && ip->nlink == 0){
-    // inode has no links and no other references: truncate and free.
-
-    // ip->ref == 1 means no other process can have ip locked,
-    // so this acquiresleep() won't block (or deadlock).
-    acquiresleep(&ip->lock);
-
-    release(&itable.lock);
-
-    itrunc(ip);
-    ip->type = 0;
-    iupdate(ip);
-    ip->valid = 0;
-
-    releasesleep(&ip->lock);
-
-    acquire(&itable.lock);
-  }
-
-  ip->ref--;
-  release(&itable.lock);
 }
 
 // Common idiom: unlock, then put.

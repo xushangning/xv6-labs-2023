@@ -15,9 +15,11 @@ struct Itable {
     inode: [Inode; NINODE],
 }
 
+#[allow(non_upper_case_globals)]
+static mut itable: Itable = unsafe { core::mem::zeroed() };
+
 unsafe extern "C" {
     static mut sb: crate::sys::superblock;
-    static mut itable: Itable;
     fn bfree(dev: c_int, b: c_uint);
     fn bmap(ip: *mut Inode, bn: c_uint) -> c_uint;
     fn namex(path: *mut c_char, nameiparent: c_int, name: *mut c_char) -> *mut Inode;
@@ -280,4 +282,55 @@ impl Inode {
         st.nlink = self.nlink;
         st.size = self.size as u64;
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn iinit() {
+    unsafe {
+        crate::sys::initlock(&raw mut itable.lock, c"itable".as_ptr().cast_mut());
+        for i in 0..NINODE {
+            crate::sys::initsleeplock(
+                &raw mut itable.inode[i].lock,
+                c"inode".as_ptr().cast_mut(),
+            );
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn iget(dev: c_uint, inum: c_uint) -> *mut Inode {
+    unsafe {
+        crate::sys::acquire(&raw mut itable.lock);
+        let mut empty: *mut Inode = core::ptr::null_mut();
+        for i in 0..NINODE {
+            let ip = &raw mut itable.inode[i];
+            if (*ip).ref_ > 0 && (*ip).dev == dev && (*ip).inum == inum {
+                (*ip).ref_ += 1;
+                crate::sys::release(&raw mut itable.lock);
+                return ip;
+            }
+            if empty.is_null() && (*ip).ref_ == 0 {
+                empty = ip;
+            }
+        }
+        if empty.is_null() {
+            panic!("iget: no inodes");
+        }
+        (*empty).dev = dev;
+        (*empty).inum = inum;
+        (*empty).ref_ = 1;
+        (*empty).valid = 0;
+        crate::sys::release(&raw mut itable.lock);
+        empty
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn idup(ip: *mut Inode) -> *mut Inode {
+    unsafe { (*ip).dup() }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn iput(ip: *mut Inode) {
+    unsafe { (*ip).put() }
 }
