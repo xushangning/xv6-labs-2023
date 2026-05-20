@@ -1,4 +1,4 @@
-use core::ffi::{c_int, c_short, c_uint};
+use core::ffi::{c_char, c_int, c_short, c_uint};
 
 use crate::{stat::InodeType, sys::sleeplock};
 
@@ -255,6 +255,13 @@ impl Inode {
         }
         unsafe { crate::sys::iupdate(self) };
         Ok(tot)
+    }
+
+    // Look up and return the inode for a path name.
+    // Must be called inside a transaction since it calls iput().
+    pub unsafe fn namei(path: *mut c_char) -> *mut Self {
+        let mut name = [0u8; DIRSIZ];
+        unsafe { crate::sys::namex(path, 0, name.as_mut_ptr().cast()) }
     }
 
     // Copy stat information from inode.

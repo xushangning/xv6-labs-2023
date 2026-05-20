@@ -38,7 +38,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
     let elf_entry = {
         let _op_guard = OpGuard::new();
 
-        let ip = unsafe { crate::sys::namei(path.cast_mut()) };
+        let ip = unsafe { crate::fs::Inode::namei(path.cast_mut()) };
         if ip.is_null() {
             return Err(());
         }

@@ -212,7 +212,7 @@ pub(super) fn userinit() {
             c"initcode".as_ptr(),
             p.name.len().try_into().unwrap(),
         );
-        p.cwd = crate::sys::namei(c"/".as_ptr().cast_mut());
+        p.cwd = crate::fs::Inode::namei(c"/".as_ptr().cast_mut());
 
         p.state = procstate_RUNNABLE;
 
