@@ -6,7 +6,7 @@ pub(super) const BSIZE: usize = 1024;
 const NDIRECT: usize = 12;
 const NINDIRECT: usize = BSIZE / core::mem::size_of::<c_uint>();
 const MAXFILE: usize = NDIRECT + NINDIRECT;
-pub(super) const DIRSIZ: usize = 14;
+pub(crate) const DIRSIZ: usize = 14;
 const NINODE: usize = 50;
 
 #[repr(C)]

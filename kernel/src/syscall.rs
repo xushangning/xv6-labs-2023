@@ -64,15 +64,6 @@ unsafe fn argstr(n: c_int, buf: &mut [MaybeUninit<c_char>]) -> c_int {
     unsafe { crate::sys::argstr(n, buf.as_mut_ptr().cast(), buf.len().try_into().unwrap()) }
 }
 
-// Prototypes for the functions that handle system calls.
-unsafe extern "C" {
-    fn sys_chdir() -> u64;
-    fn sys_mknod() -> u64;
-    fn sys_unlink() -> u64;
-    fn sys_link() -> u64;
-    fn sys_mkdir() -> u64;
-}
-
 /// An array mapping syscall numbers from syscall.h
 /// to the function that handles the system call.
 static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
@@ -85,7 +76,7 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(proc::kill),
     Some(file::exec),
     Some(file::fstat),
-    Some(sys_chdir),
+    Some(file::chdir),
     Some(file::dup),
     Some(proc::getpid),
     Some(proc::sbrk),
@@ -93,10 +84,10 @@ static SYSCALLS: &[Option<unsafe extern "C" fn() -> u64>] = &[
     Some(proc::uptime),
     Some(file::open),
     Some(file::write),
-    Some(sys_mknod),
-    Some(sys_unlink),
-    Some(sys_link),
-    Some(sys_mkdir),
+    Some(file::mknod),
+    Some(file::unlink),
+    Some(file::link),
+    Some(file::mkdir),
     Some(file::close),
 ];
 
