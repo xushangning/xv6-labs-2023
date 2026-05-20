@@ -2,7 +2,15 @@ use core::ffi::{c_int, c_short, c_uint};
 
 use crate::{stat::InodeType, sys::sleeplock};
 
+pub(super) const BSIZE: usize = 1024;
 const NDIRECT: usize = 12;
+const NINDIRECT: usize = BSIZE / core::mem::size_of::<c_uint>();
+const MAXFILE: usize = NDIRECT + NINDIRECT;
+pub(super) const DIRSIZ: usize = 14;
+
+unsafe extern "C" {
+    static mut sb: crate::sys::superblock;
+}
 
 /// in-memory copy of an inode
 #[repr(C)]
@@ -47,4 +55,22 @@ pub(super) unsafe fn readi(
         )
     };
     usize::try_from(ret).map_err(|_| ())
+}
+
+impl Inode {
+    fn iblock(inum: c_uint) -> c_uint {
+        let ipb = (BSIZE / core::mem::size_of::<crate::sys::dinode>()) as c_uint;
+        unsafe { inum / ipb + sb.inodestart }
+    }
+
+    // Copy stat information from inode.
+    // Caller must hold ip->lock.
+    pub unsafe fn stat(&mut self, st: *mut crate::sys::stat) {
+        let st = unsafe { &mut *st };
+        st.dev = self.dev as c_int;
+        st.ino = self.inum;
+        st.type_ = self.type_ as c_short;
+        st.nlink = self.nlink;
+        st.size = self.size as u64;
+    }
 }

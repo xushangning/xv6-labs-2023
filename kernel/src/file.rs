@@ -116,7 +116,7 @@ impl File {
         let mut st = MaybeUninit::<crate::sys::stat>::uninit();
         unsafe {
             crate::sys::ilock(ip.as_ptr());
-            crate::sys::stati(ip.as_ptr(), st.as_mut_ptr());
+            (*ip.as_ptr()).stat(st.as_mut_ptr());
             crate::sys::iunlock(ip.as_ptr());
         }
         let p = unsafe { crate::sys::myproc() };

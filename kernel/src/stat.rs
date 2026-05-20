@@ -1,4 +1,5 @@
 #[allow(dead_code)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(i16)]
 pub(crate) enum InodeType {
     Unknown = 0,
