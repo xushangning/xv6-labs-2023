@@ -151,12 +151,19 @@ impl File {
             }
             FileKind::Inode { ip, off } => unsafe {
                 (*ip.as_ptr()).lock();
-                let r = crate::sys::readi(ip.as_ptr(), 1, addr, off.get(), n.try_into().unwrap());
-                if r > 0 {
-                    off.update(|off| off + r.cast_unsigned());
+                let r = (*ip.as_ptr()).read(
+                    true,
+                    addr as usize,
+                    off.get() as usize,
+                    n.try_into().unwrap(),
+                );
+                if let Ok(n) = r {
+                    if n > 0 {
+                        off.update(|off| off + n as u32);
+                    }
                 }
                 (*ip.as_ptr()).unlock();
-                r
+                r.map(|n| n as c_int).unwrap_or(-1)
             },
             FileKind::None => panic!("fileread"),
         }

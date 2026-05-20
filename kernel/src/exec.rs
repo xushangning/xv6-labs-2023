@@ -5,7 +5,6 @@ use core::{
 };
 
 use crate::{
-    fs,
     log::OpGuard,
     riscv::PGSIZE,
     sys::{inode, pagetable_t},
@@ -46,13 +45,12 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
         unsafe {
             (*ip).lock();
         }
-        let ip = DropGuard::new(ip, |ip| unsafe { (*ip).unlock_put() });
+        let _ip_guard = DropGuard::new(ip, |ip| unsafe { (*ip).unlock_put() });
 
         // Check ELF header
         let mut elf = MaybeUninit::<Header>::uninit();
         if unsafe {
-            fs::readi(
-                *ip,
+            (*ip).read(
                 false,
                 elf.as_mut_ptr().addr(),
                 0,
@@ -73,11 +71,10 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
         for _ in 0..elf.e_phnum {
             let mut ph = MaybeUninit::<ProgramHeader>::uninit();
             if unsafe {
-                fs::readi(
-                    *ip,
+                (*ip).read(
                     false,
                     ph.as_mut_ptr().addr(),
-                    off.try_into().unwrap(),
+                    off,
                     mem::size_of::<ProgramHeader>(),
                 )
             }? != mem::size_of::<ProgramHeader>()
@@ -108,7 +105,7 @@ pub(super) fn exec(path: *const c_char, argv: &[*const c_char]) -> Result<usize,
                 loadseg(
                     proc_vm.0.pagetable.as_mut(),
                     p_vaddr..p_vaddr + p_filesz,
-                    *ip,
+                    ip,
                     ph.p_offset.try_into().unwrap(),
                 )
             }?;
@@ -230,7 +227,7 @@ unsafe fn loadseg(
             panic!("loadseg: address should exist");
         }
         let n = core::cmp::min(va_end - va, PGSIZE);
-        if unsafe { fs::readi(ip, false, pa.try_into().unwrap(), offset, n) }? != n {
+        if unsafe { (*ip).read(false, pa.try_into().unwrap(), offset, n) }? != n {
             return Err(());
         }
         offset += PGSIZE;

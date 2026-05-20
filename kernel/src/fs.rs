@@ -34,28 +34,6 @@ pub struct Inode {
     pub addrs: [c_uint; NDIRECT + 1],
 }
 
-/// Read data from inode.
-/// Caller must hold ip->lock.
-/// If user_dst==1, then dst is a user virtual address;
-/// otherwise, dst is a kernel address.
-pub(super) unsafe fn readi(
-    ip: *mut crate::sys::inode,
-    user_dst: bool,
-    dst: usize,
-    off: usize,
-    n: usize,
-) -> Result<usize, ()> {
-    let ret = unsafe {
-        crate::sys::readi(
-            ip,
-            user_dst.into(),
-            dst.try_into().unwrap(),
-            off.try_into().unwrap(),
-            n.try_into().unwrap(),
-        )
-    };
-    usize::try_from(ret).map_err(|_| ())
-}
 
 impl Inode {
     fn iblock(inum: c_uint) -> c_uint {
@@ -173,6 +151,53 @@ impl Inode {
             self.size = 0;
             crate::sys::iupdate(self);
         }
+    }
+
+    // Read data from inode.
+    // Caller must hold ip->lock.
+    // If user_dst==1, then dst is a user virtual address;
+    // otherwise, dst is a kernel address.
+    pub unsafe fn read(
+        &mut self,
+        user_dst: bool,
+        mut dst: usize,
+        mut off: usize,
+        n: usize,
+    ) -> Result<usize, ()> {
+        if off > self.size as usize || off + n < off {
+            return Ok(0);
+        }
+        let n = if off + n > self.size as usize {
+            self.size as usize - off
+        } else {
+            n
+        };
+        let mut tot = 0;
+        while tot < n {
+            let addr =
+                unsafe { crate::sys::bmap(self, (off / BSIZE) as c_uint) };
+            if addr == 0 {
+                break;
+            }
+            let bp = unsafe { crate::sys::bread(self.dev, addr) };
+            let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
+            let ok = unsafe {
+                crate::sys::either_copyout(
+                    user_dst as c_int,
+                    dst as u64,
+                    (*bp).data.as_ptr().add(off % BSIZE) as *mut core::ffi::c_void,
+                    m as u64,
+                ) != -1
+            };
+            unsafe { crate::sys::brelse(bp) };
+            if !ok {
+                return Err(());
+            }
+            tot += m;
+            off += m;
+            dst += m;
+        }
+        Ok(tot)
     }
 
     // Copy stat information from inode.
