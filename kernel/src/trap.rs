@@ -1,10 +1,16 @@
 use core::ffi::{c_int, c_uint};
 
-use riscv::register::{
-    satp, scause, sepc,
-    sstatus::{self, SPP},
-    stval,
-    stvec::{self, Stvec},
+use riscv::{
+    interrupt::{
+        Trap,
+        supervisor::{self as interrupt, Exception, Interrupt},
+    },
+    register::{
+        satp, scause, sepc,
+        sstatus::{self, SPP},
+        stval,
+        stvec::{self, Stvec},
+    },
 };
 
 use crate::{
@@ -60,10 +66,15 @@ unsafe extern "C" fn usertrap() {
     unsafe {
         // save user program counter.
         p.trapframe.as_mut().unwrap().assume_init_mut().epc = sepc::read().try_into().unwrap();
+    }
 
-        if scause::read().bits() == 8 {
-            // system call
+    if matches!(
+        interrupt::try_cause::<Interrupt, Exception>(),
+        Ok(Trap::Exception(Exception::UserEnvCall))
+    ) {
+        // system call
 
+        unsafe {
             if killed(p) != 0 {
                 exit(-1);
             }
@@ -74,28 +85,32 @@ unsafe extern "C" fn usertrap() {
 
             // an interrupt will change sepc, scause, and sstatus,
             // so enable only now that we're done with those registers.
-            intr::on();
+            interrupt::enable();
 
             crate::syscall::syscall();
+        }
+    } else {
+        which_dev = devintr();
+        if which_dev != 0 {
+            // ok
         } else {
-            which_dev = devintr();
-            if which_dev != 0 {
-                // ok
-            } else {
-                println!(
-                    "usertrap(): unexpected scause {:x} pid={}",
-                    scause::read().bits(),
-                    p.pid,
-                );
-                println!(
-                    "            sepc={:x} stval={:x}",
-                    sepc::read(),
-                    stval::read(),
-                );
+            println!(
+                "usertrap(): unexpected scause {:x} pid={}",
+                scause::read().bits(),
+                p.pid,
+            );
+            println!(
+                "            sepc={:x} stval={:x}",
+                sepc::read(),
+                stval::read(),
+            );
+            unsafe {
                 crate::sys::setkilled(p);
             }
         }
+    }
 
+    unsafe {
         if killed(p) != 0 {
             exit(-1);
         }
@@ -115,9 +130,7 @@ pub(super) fn usertrapret() -> ! {
 
     let p = unsafe { myproc().as_mut().unwrap() };
 
-    unsafe {
-        intr::off();
-    }
+    interrupt::disable();
 
     let trampoline_uservec =
         TRAMPOLINE + ((uservec as *const ()).addr() - (trampoline as *const ()).addr());
@@ -203,50 +216,54 @@ fn devintr() -> c_int {
         sys::{plic_claim, plic_complete, virtio_disk_intr},
     };
 
-    let scause = scause::read();
+    let Ok(Trap::Interrupt(scause)) = interrupt::try_cause::<Interrupt, Exception>() else {
+        return 0;
+    };
 
-    if scause.is_interrupt() && scause.bits() & 0xff == 9 {
-        // this is a supervisor external interrupt, via PLIC.
+    match scause {
+        Interrupt::SupervisorExternal => {
+            // this is a supervisor external interrupt, via PLIC.
 
-        unsafe {
-            // irq indicates which device interrupted.
-            let irq = plic_claim();
+            unsafe {
+                // irq indicates which device interrupted.
+                let irq = plic_claim();
 
-            match irq {
-                uart0::IRQ => crate::uart::intr(),
-                virtio0::IRQ => virtio_disk_intr(),
-                _ => {
-                    if irq != 0 {
-                        println!("unexpected interrupt irq={irq}")
+                match irq {
+                    uart0::IRQ => crate::uart::intr(),
+                    virtio0::IRQ => virtio_disk_intr(),
+                    _ => {
+                        if irq != 0 {
+                            println!("unexpected interrupt irq={irq}")
+                        }
                     }
+                }
+
+                // the PLIC allows each device to raise at most one
+                // interrupt at a time; tell the PLIC the device is
+                // now allowed to interrupt again.
+                if irq != 0 {
+                    plic_complete(irq);
                 }
             }
 
-            // the PLIC allows each device to raise at most one
-            // interrupt at a time; tell the PLIC the device is
-            // now allowed to interrupt again.
-            if irq != 0 {
-                plic_complete(irq);
-            }
+            1
         }
+        Interrupt::SupervisorSoft => {
+            // software interrupt from a machine-mode timer interrupt,
+            // forwarded by timervec in kernelvec.S.
 
-        1
-    } else if scause.is_interrupt() && scause.code() == 1 {
-        // software interrupt from a machine-mode timer interrupt,
-        // forwarded by timervec in kernelvec.S.
+            unsafe {
+                if crate::proc::cpuid() == 0 {
+                    clockintr();
+                }
 
-        unsafe {
-            if crate::proc::cpuid() == 0 {
-                clockintr();
+                // acknowledge the software interrupt by clearing
+                // the SSIP bit in sip.
+                riscv::register::sip::clear_ssoft();
             }
 
-            // acknowledge the software interrupt by clearing
-            // the SSIP bit in sip.
-            riscv::register::sip::clear_ssoft();
+            2
         }
-
-        2
-    } else {
-        0
+        _ => 0,
     }
 }
