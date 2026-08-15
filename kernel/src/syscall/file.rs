@@ -18,15 +18,6 @@ use crate::{
     sys::{NOFILE, argaddr, myproc},
 };
 
-unsafe extern "C" {
-    fn create(
-        path: *mut c_char,
-        type_: core::ffi::c_short,
-        major: core::ffi::c_short,
-        minor: core::ffi::c_short,
-    ) -> *mut crate::sys::inode;
-}
-
 /// Fetch the nth word-sized system call argument as a file descriptor
 /// and return both the descriptor and the corresponding struct file.
 fn argfd<'a>(n: c_int) -> Result<(c_int, &'a Rc<File>), ()> {
@@ -92,6 +83,38 @@ pub(super) unsafe extern "C" fn write() -> u64 {
         return (-1i64).cast_unsigned();
     };
     unsafe { f.write(p.assume_init(), n).cast_unsigned().into() }
+}
+
+pub(super) unsafe extern "C" fn close() -> u64 {
+    let Ok((fd, _)) = argfd(0) else {
+        return (-1i64).cast_unsigned();
+    };
+    crate::file::close(unsafe {
+        (*myproc()).ofile[usize::try_from(fd).unwrap()]
+            .take()
+            .unwrap()
+    });
+    0
+}
+
+pub(super) unsafe extern "C" fn fstat() -> u64 {
+    let st = unsafe { super::argaddr(1) }; // user pointer to struct stat
+    let Ok((_, f)) = argfd(0) else {
+        return (-1i64).cast_unsigned();
+    };
+    match f.stat(st) {
+        Ok(_) => 0,
+        Err(_) => (-1i64).cast_unsigned(),
+    }
+}
+
+unsafe extern "C" {
+    fn create(
+        path: *mut c_char,
+        type_: core::ffi::c_short,
+        major: core::ffi::c_short,
+        minor: core::ffi::c_short,
+    ) -> *mut crate::sys::inode;
 }
 
 pub(super) unsafe extern "C" fn open() -> u64 {
@@ -168,29 +191,6 @@ pub(super) unsafe extern "C" fn open() -> u64 {
             crate::file::close(f);
             (-1i64).cast_unsigned()
         }
-    }
-}
-
-pub(super) unsafe extern "C" fn close() -> u64 {
-    let Ok((fd, _)) = argfd(0) else {
-        return (-1i64).cast_unsigned();
-    };
-    crate::file::close(unsafe {
-        (*myproc()).ofile[usize::try_from(fd).unwrap()]
-            .take()
-            .unwrap()
-    });
-    0
-}
-
-pub(super) unsafe extern "C" fn fstat() -> u64 {
-    let st = unsafe { super::argaddr(1) }; // user pointer to struct stat
-    let Ok((_, f)) = argfd(0) else {
-        return (-1i64).cast_unsigned();
-    };
-    match f.stat(st) {
-        Ok(_) => 0,
-        Err(_) => (-1i64).cast_unsigned(),
     }
 }
 
