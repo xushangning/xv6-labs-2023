@@ -47,6 +47,12 @@ impl<T: ?Sized> Mutex<T> {
     pub(crate) fn raw(&self) -> *mut spinlock {
         self.inner.get()
     }
+
+    /// Safe, lock-free access when the caller already has exclusive access
+    /// to the `Mutex` itself (e.g. inside `Drop`).
+    pub(crate) fn get_mut(&mut self) -> &mut T {
+        self.data.get_mut()
+    }
 }
 
 impl<T: ?Sized> Drop for MutexGuard<'_, T> {

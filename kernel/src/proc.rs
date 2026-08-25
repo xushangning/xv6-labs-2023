@@ -125,7 +125,7 @@ impl Drop for Proc {
         self.parent = ptr::null_mut();
         self.name[0] = 0;
 
-        let mut st = self.status.lock();
+        let st = self.status.get_mut();
         st.pid = 0;
         st.chan = ptr::null_mut();
         st.killed = 0;
