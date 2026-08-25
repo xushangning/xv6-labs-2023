@@ -40,6 +40,13 @@ impl<T: ?Sized> Mutex<T> {
         }
         MutexGuard { lock: self }
     }
+
+    /// Raw pointer to the underlying spinlock, for code that must release a
+    /// lock acquired on its behalf by C code, without ever holding a
+    /// `MutexGuard` for it.
+    pub(crate) fn raw(&self) -> *mut spinlock {
+        self.inner.get()
+    }
 }
 
 impl<T: ?Sized> Drop for MutexGuard<'_, T> {

@@ -11,7 +11,7 @@ use crate::{
     memlayout::{TRAMPOLINE, TRAPFRAME},
     rc::Rc,
     riscv::PGSIZE,
-    spinlock::MutexGuard,
+    spinlock::{Mutex, MutexGuard},
     sys::{
         acquire, myproc, procstate_RUNNABLE, procstate_SLEEPING, procstate_UNUSED,
         procstate_ZOMBIE, release, safestrcpy, spinlock, wakeup,
@@ -21,13 +21,12 @@ use crate::{
 
 #[repr(C)]
 pub(super) struct Proc {
-    pub lock: spinlock,
-    pub state: crate::sys::procstate,
-    pub chan: *mut c_void,
-    pub killed: c_int,
-    pub xstate: c_int,
-    pub pid: c_int,
+    pub status: Mutex<ProcStatus>,
+
+    // wait_lock must be held when using this:
     pub parent: *mut Proc,
+
+    // these are private to the process, so p->lock need not be held.
     pub kstack: u64,
     pub sz: u64,
     pub pagetable: Option<Box<PageTable>>,
@@ -36,6 +35,15 @@ pub(super) struct Proc {
     pub ofile: [Option<Rc<File>>; 16],
     pub cwd: *mut crate::sys::inode,
     pub name: [c_char; 16],
+}
+
+#[repr(C)]
+pub(super) struct ProcStatus {
+    pub state: crate::sys::procstate,
+    pub chan: *mut c_void,
+    pub killed: c_int,
+    pub xstate: c_int,
+    pub pid: c_int,
 }
 
 unsafe extern "C" {
@@ -60,33 +68,31 @@ fn allocpid() -> c_int {
 }
 
 /// Look in the process table for an UNUSED proc.
-/// If found, initialize state required to run in the kernel,
-/// and return with p->lock held.
+/// If found, initialize state required to run in the kernel.
 /// If there are no free procs, or a memory allocation fails, return 0.
 fn allocproc() -> *mut Proc {
     use crate::sys::procstate_USED;
 
     for p in unsafe { &mut *&raw mut proc } {
-        unsafe {
-            acquire(&mut p.lock);
-        }
-        if p.state == procstate_UNUSED {
-            p.pid = allocpid();
-            p.state = procstate_USED;
+        let mut st = p.status.lock();
+        if st.state == procstate_UNUSED {
+            st.pid = allocpid();
+            st.state = procstate_USED;
+            // The rest of setup below only touches fields private to this
+            // process, so p->lock need not stay held for it.
+            drop(st);
 
             unsafe {
                 // Allocate a trapframe page.
                 p.trapframe = Box::try_new_uninit().ok();
                 if p.trapframe.is_none() {
                     ptr::drop_in_place(p);
-                    release(&mut p.lock);
                     return ptr::null_mut();
                 }
 
                 // An empty user page table.
                 let Ok(proc_vm) = ProcVm::new(p) else {
                     ptr::drop_in_place(p);
-                    release(&mut p.lock);
                     return ptr::null_mut();
                 };
                 p.pagetable = Some(proc_vm.leak());
@@ -99,10 +105,6 @@ fn allocproc() -> *mut Proc {
 
                 return p;
             }
-        } else {
-            unsafe {
-                release(&mut p.lock);
-            }
         }
     }
     ptr::null_mut()
@@ -110,7 +112,6 @@ fn allocproc() -> *mut Proc {
 
 /// free a proc structure and the data hanging from it,
 /// including user pages.
-/// p->lock must be held.
 impl Drop for Proc {
     fn drop(&mut self) {
         self.trapframe = None;
@@ -121,13 +122,15 @@ impl Drop for Proc {
             }));
         }
         self.sz = 0;
-        self.pid = 0;
         self.parent = ptr::null_mut();
         self.name[0] = 0;
-        self.chan = ptr::null_mut();
-        self.killed = 0;
-        self.xstate = 0;
-        self.state = procstate_UNUSED;
+
+        let mut st = self.status.lock();
+        st.pid = 0;
+        st.chan = ptr::null_mut();
+        st.killed = 0;
+        st.xstate = 0;
+        st.state = procstate_UNUSED;
     }
 }
 
@@ -214,9 +217,7 @@ pub(super) fn userinit() {
         );
         p.cwd = crate::sys::namei(c"/".as_ptr().cast_mut());
 
-        p.state = procstate_RUNNABLE;
-
-        release(&mut p.lock);
+        p.status.lock().state = procstate_RUNNABLE;
     }
 }
 
@@ -263,7 +264,6 @@ pub(super) fn fork() -> c_int {
     {
         unsafe {
             ptr::drop_in_place(np);
-            release(&mut np.lock);
         }
         return -1;
     }
@@ -292,19 +292,15 @@ pub(super) fn fork() -> c_int {
         );
     }
 
-    let pid = np.pid;
+    let pid = np.status.lock().pid;
 
     unsafe {
-        release(&mut np.lock);
-
         acquire(&raw mut wait_lock);
         np.parent = p;
         release(&raw mut wait_lock);
-
-        acquire(&raw mut np.lock);
-        np.state = procstate_RUNNABLE;
-        release(&raw mut np.lock);
     }
+
+    np.status.lock().state = procstate_RUNNABLE;
 
     pid
 }
@@ -355,12 +351,18 @@ pub(super) fn exit(status: c_int) -> ! {
         // Parent might be sleeping in wait().
         wakeup(p.parent.cast());
 
-        acquire(&mut p.lock);
+        let mut st = p.status.lock();
 
-        p.xstate = status;
-        p.state = procstate_ZOMBIE;
+        st.xstate = status;
+        st.state = procstate_ZOMBIE;
 
         release(&raw mut wait_lock);
+
+        // p->lock stays held across sched(): exit() never returns past it
+        // (this process is now a zombie), so it is never released through
+        // this guard. Its eventual release happens via the scheduler's own
+        // C-side bookkeeping on the same underlying spinlock.
+        mem::forget(st);
 
         // Jump into the scheduler, never to return.
         sched();
@@ -384,30 +386,37 @@ pub(super) fn wait(addr: usize) -> c_int {
             for pp in &mut *&raw mut proc {
                 if pp.parent == p {
                     // make sure the child isn't still in exit() or swtch().
-                    acquire(&mut pp.lock);
+                    let st = pp.status.lock();
 
                     havekids = true;
-                    if pp.state == procstate_ZOMBIE {
+                    if st.state == procstate_ZOMBIE {
                         // Found one.
-                        let pid = pp.pid;
+                        let pid = st.pid;
                         if addr != 0
                             && crate::vm::copyout(
                                 p.pagetable.as_mut().unwrap().as_mut(),
                                 addr,
-                                bytemuck::bytes_of(&pp.xstate),
+                                bytemuck::bytes_of(&st.xstate),
                             )
                             .is_err()
                         {
-                            release(&mut pp.lock);
+                            drop(st);
                             release(&raw mut wait_lock);
                             return -1;
                         }
+                        // Release before drop_in_place: Proc::drop takes its
+                        // own fresh status lock to reset pid/chan/killed/
+                        // xstate/state, and a live guard here would borrow-
+                        // conflict with drop_in_place needing pp exclusively.
+                        // The brief unlocked ZOMBIE window is harmless: no
+                        // other wait() can reach this child while wait_lock
+                        // is held, and kill()/notify_all() only act on
+                        // SLEEPING processes.
+                        drop(st);
                         ptr::drop_in_place(pp);
-                        release(&mut pp.lock);
                         release(&raw mut wait_lock);
                         return pid;
                     }
-                    release(&mut pp.lock);
                 }
             }
 
@@ -430,7 +439,7 @@ extern "C" fn forkret() {
 
     // Still holding p->lock from scheduler.
     unsafe {
-        release(&mut (*myproc()).lock);
+        release((*myproc()).status.raw());
     }
 
     if FIRST.load(Ordering::Relaxed) {
@@ -467,24 +476,24 @@ impl<T> Condvar<T> {
         // (wakeup locks p->lock),
         // so it's okay to release lk.
 
+        let mut st = p.status.lock(); //DOC: sleeplock1
+        let lk = guard.lock;
+        mem::drop(guard);
+
+        // Go to sleep.
+        st.chan = self.cast_mut().cast();
+        st.state = procstate_SLEEPING;
+
+        // Tidy up.
         unsafe {
-            acquire(&mut p.lock); //DOC: sleeplock1
-            let lk = guard.lock;
-            mem::drop(guard);
-
-            // Go to sleep.
-            p.chan = self.cast_mut().cast();
-            p.state = procstate_SLEEPING;
-
-            // Tidy up.
             crate::sys::sched();
-
-            p.chan = ptr::null_mut();
-
-            // Reacquire original lock.
-            release(&mut p.lock);
-            lk.lock()
         }
+
+        st.chan = ptr::null_mut();
+
+        // Reacquire original lock.
+        drop(st);
+        lk.lock()
     }
 
     /// Wake up all processes sleeping on chan.
@@ -493,13 +502,12 @@ impl<T> Condvar<T> {
         unsafe {
             for p in &mut *&raw mut proc {
                 if ptr::from_mut(p) != myproc() {
-                    acquire(&mut p.lock);
-                    if p.state == procstate_SLEEPING
-                        && p.chan == ptr::from_ref(self).cast_mut().cast()
+                    let mut st = p.status.lock();
+                    if st.state == procstate_SLEEPING
+                        && st.chan == ptr::from_ref(self).cast_mut().cast()
                     {
-                        p.state = procstate_RUNNABLE;
+                        st.state = procstate_RUNNABLE;
                     }
-                    release(&mut p.lock);
                 }
             }
         }
@@ -514,17 +522,15 @@ pub(super) fn kill(pid: c_int) -> c_int {
 
     unsafe {
         for p in &mut *&raw mut proc {
-            acquire(&mut p.lock);
-            if p.pid == pid {
-                p.killed = 1;
-                if p.state == procstate_SLEEPING {
+            let mut st = p.status.lock();
+            if st.pid == pid {
+                st.killed = 1;
+                if st.state == procstate_SLEEPING {
                     // Wake process from sleep().
-                    p.state = procstate_RUNNABLE;
+                    st.state = procstate_RUNNABLE;
                 }
-                release(&mut p.lock);
                 return 0;
             }
-            release(&mut p.lock);
         }
     }
     -1

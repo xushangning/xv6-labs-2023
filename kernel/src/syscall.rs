@@ -112,7 +112,7 @@ pub(super) unsafe fn syscall() {
     } else {
         crate::println!(
             "{} {}: unknown sys call {num}",
-            p.pid,
+            p.status.lock().pid,
             unsafe { CStr::from_ptr(p.name.as_ptr()) }.to_str().unwrap(),
         );
         unsafe {

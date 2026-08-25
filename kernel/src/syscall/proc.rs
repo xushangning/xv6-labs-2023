@@ -5,7 +5,7 @@ pub(super) unsafe extern "C" fn exit() -> u64 {
 }
 
 pub(super) unsafe extern "C" fn getpid() -> u64 {
-    unsafe { (*myproc()).pid.cast_unsigned().into() }
+    unsafe { (*myproc()).status.lock().pid.cast_unsigned().into() }
 }
 
 pub(super) unsafe extern "C" fn fork() -> u64 {
