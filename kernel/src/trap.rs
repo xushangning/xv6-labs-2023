@@ -186,7 +186,7 @@ unsafe extern "C" fn kerneltrap() {
         } else if which_dev == 2
             && myproc()
                 .as_ref()
-                .is_some_and(|p| p.state == crate::sys::procstate_RUNNING)
+                .is_some_and(|p| matches!(p.state, crate::proc::ProcState::Running))
         {
             // give up the CPU if this is a timer interrupt.
             yield_();
