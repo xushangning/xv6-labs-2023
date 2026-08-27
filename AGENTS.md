@@ -44,6 +44,11 @@ make grade
 - When migrating a C/assembly file to Rust, add the new `.rs` file to `OBJS` as a dependency marker so Make re-triggers `cargo build` when it changes.
 - DO NOT remove C code that's been migrated to Rust unless absolutely necessary to avoid problems like symbol name collision. This is to allow easier review of the original C code should bugs arise, and to minimize the number of changes in a commit.
 
+## Commit Message Style
+
+- For C-to-Rust porting only, use the title format: `<C source file>: <old declaration> -> <new declaration>`, naming only the symbol being ported (kind keyword included on both sides), e.g. `proc.h: enum procstate -> enum ProcState`. Prefix with the C file that originally declared the symbol, not the Rust file it lands in.
+- Leave the body empty — an arrow title makes the change self-explanatory; don't restate it in prose.
+
 ## C-to-Rust Function Name Mapping
 
 Notable functions whose names changed completely during migration. Useful when translating call sites from C to Rust, and for showing how xv6 OS implementation maps to Rust concepts.
