@@ -12,17 +12,26 @@ use crate::{
     rc::Rc,
     riscv::PGSIZE,
     spinlock::MutexGuard,
-    sys::{
-        acquire, myproc, procstate_RUNNABLE, procstate_SLEEPING, procstate_UNUSED,
-        procstate_ZOMBIE, release, safestrcpy, spinlock, wakeup,
-    },
+    sys::{acquire, myproc, release, safestrcpy, spinlock, wakeup},
     vm::{PageTable, ProcVm, PteFlags, Vm},
 };
 
 #[repr(C)]
+pub(super) enum ProcState {
+    Unused,
+    Used,
+    Sleeping,
+    Runnable,
+    // TODO: Only set by scheduler() in proc.c, which hasn't been ported to Rust yet.
+    #[allow(dead_code)]
+    Running,
+    Zombie,
+}
+
+#[repr(C)]
 pub(super) struct Proc {
     pub lock: spinlock,
-    pub state: crate::sys::procstate,
+    pub state: ProcState,
     pub chan: *mut c_void,
     pub killed: c_int,
     pub xstate: c_int,
@@ -64,15 +73,13 @@ fn allocpid() -> c_int {
 /// and return with p->lock held.
 /// If there are no free procs, or a memory allocation fails, return 0.
 fn allocproc() -> *mut Proc {
-    use crate::sys::procstate_USED;
-
     for p in unsafe { &mut *&raw mut proc } {
         unsafe {
             acquire(&mut p.lock);
         }
-        if p.state == procstate_UNUSED {
+        if matches!(p.state, ProcState::Unused) {
             p.pid = allocpid();
-            p.state = procstate_USED;
+            p.state = ProcState::Used;
 
             unsafe {
                 // Allocate a trapframe page.
@@ -96,13 +103,12 @@ fn allocproc() -> *mut Proc {
                 (&raw mut p.context).write_bytes(0, 1);
                 p.context.ra = (forkret as *const ()).addr().try_into().unwrap();
                 p.context.sp = p.kstack + PGSIZE as u64;
+            }
 
-                return p;
-            }
-        } else {
-            unsafe {
-                release(&mut p.lock);
-            }
+            return p;
+        }
+        unsafe {
+            release(&mut p.lock);
         }
     }
     ptr::null_mut()
@@ -127,7 +133,7 @@ impl Drop for Proc {
         self.chan = ptr::null_mut();
         self.killed = 0;
         self.xstate = 0;
-        self.state = procstate_UNUSED;
+        self.state = ProcState::Unused;
     }
 }
 
@@ -214,7 +220,7 @@ pub(super) fn userinit() {
         );
         p.cwd = crate::sys::namei(c"/".as_ptr().cast_mut());
 
-        p.state = procstate_RUNNABLE;
+        p.state = ProcState::Runnable;
 
         release(&mut p.lock);
     }
@@ -302,7 +308,7 @@ pub(super) fn fork() -> c_int {
         release(&raw mut wait_lock);
 
         acquire(&raw mut np.lock);
-        np.state = procstate_RUNNABLE;
+        np.state = ProcState::Runnable;
         release(&raw mut np.lock);
     }
 
@@ -358,7 +364,7 @@ pub(super) fn exit(status: c_int) -> ! {
         acquire(&mut p.lock);
 
         p.xstate = status;
-        p.state = procstate_ZOMBIE;
+        p.state = ProcState::Zombie;
 
         release(&raw mut wait_lock);
 
@@ -387,7 +393,7 @@ pub(super) fn wait(addr: usize) -> c_int {
                     acquire(&mut pp.lock);
 
                     havekids = true;
-                    if pp.state == procstate_ZOMBIE {
+                    if matches!(pp.state, ProcState::Zombie) {
                         // Found one.
                         let pid = pp.pid;
                         if addr != 0
@@ -474,7 +480,7 @@ impl<T> Condvar<T> {
 
             // Go to sleep.
             p.chan = self.cast_mut().cast();
-            p.state = procstate_SLEEPING;
+            p.state = ProcState::Sleeping;
 
             // Tidy up.
             crate::sys::sched();
@@ -494,10 +500,10 @@ impl<T> Condvar<T> {
             for p in &mut *&raw mut proc {
                 if ptr::from_mut(p) != myproc() {
                     acquire(&mut p.lock);
-                    if p.state == procstate_SLEEPING
+                    if matches!(p.state, ProcState::Sleeping)
                         && p.chan == ptr::from_ref(self).cast_mut().cast()
                     {
-                        p.state = procstate_RUNNABLE;
+                        p.state = ProcState::Runnable;
                     }
                     release(&mut p.lock);
                 }
@@ -510,16 +516,14 @@ impl<T> Condvar<T> {
 /// The victim won't exit until it tries to return
 /// to user space (see usertrap() in trap.c).
 pub(super) fn kill(pid: c_int) -> c_int {
-    use crate::sys::procstate_SLEEPING;
-
     unsafe {
         for p in &mut *&raw mut proc {
             acquire(&mut p.lock);
             if p.pid == pid {
                 p.killed = 1;
-                if p.state == procstate_SLEEPING {
+                if matches!(p.state, ProcState::Sleeping) {
                     // Wake process from sleep().
-                    p.state = procstate_RUNNABLE;
+                    p.state = ProcState::Runnable;
                 }
                 release(&mut p.lock);
                 return 0;
