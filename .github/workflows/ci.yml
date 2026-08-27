@@ -2,7 +2,13 @@ name: make grade
 
 on:
   push:
+    paths-ignore:
+      - 'README.md'
+      - 'AGENTS.md'
   pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'AGENTS.md'
 
 jobs:
   grade:
