@@ -1,4 +1,4 @@
-name: make grade
+name: GRADE
 
 on:
   push:
@@ -40,6 +40,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-riscv64-unknown-elf qemu-system-misc
 
+      # Add RISC-V bare-metal target support:
+      # https://doc.rust-lang.org/rustc/platform-support/riscv64gc-unknown-linux-gnu.html
       # kernel/rust-toolchain.toml pins the nightly channel, so the target
       # must be added to nightly explicitly rather than to the default
       # toolchain.
@@ -48,10 +50,5 @@ jobs:
           rustup toolchain install nightly
           rustup target add --toolchain nightly riscv64gc-unknown-none-elf
 
-      - name: Verify toolchain
-        run: |
-          riscv64-unknown-elf-gcc --version   # should print GCC version
-          qemu-system-riscv64 --version       # should print QEMU version 5.1 or higher
-
-      - name: make grade
+      - name: GRADE
         run: make grade
