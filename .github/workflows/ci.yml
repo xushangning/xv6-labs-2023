@@ -10,7 +10,6 @@ on:
       - 'Makefile'
       - 'gradelib.py'
       - 'grade-lab-*'
-      - '.github/workflows/ci.yml'
   pull_request:
     paths:
       - 'kernel/**'
@@ -20,7 +19,6 @@ on:
       - 'Makefile'
       - 'gradelib.py'
       - 'grade-lab-*'
-      - '.github/workflows/ci.yml'
 
 jobs:
   grade:
