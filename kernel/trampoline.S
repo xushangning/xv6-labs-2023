@@ -146,3 +146,9 @@ userret:
         # return to user mode and user pc.
         # usertrapret() set up sstatus and sepc.
         sret
+
+# Rust concatenates the code of multiple global_asm! blocks that land in the
+# same codegen unit before assembling them, so leaving the assembler in
+# trampsec here can silently place unrelated kernel code (e.g. kernelvec.S's)
+# in the user/kernel-shared trampoline page.
+.text
