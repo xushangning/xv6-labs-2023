@@ -1,4 +1,4 @@
-name: Grade
+name: CI
 
 on:
   push:
