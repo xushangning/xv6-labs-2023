@@ -24,15 +24,25 @@ on:
 
 jobs:
   grade:
+    name: Grade
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
+      # Install the bare-metal GCC toolchain, not `gcc-riscv64-linux-gnu`
+      # stated on the course website
+      # (https://pdos.csail.mit.edu/6.828/2023/tools.html), which targets
+      # the Linux ABI and causes linker errors with stack-protector symbols
+      # in a freestanding kernel. `apt-get update` runs first to avoid 404
+      # errors from stale mirror metadata.
       - name: Install RISC-V toolchain and QEMU
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-riscv64-unknown-elf qemu-system-misc
 
+      # kernel/rust-toolchain.toml pins the nightly channel, so the target
+      # must be added to nightly explicitly rather than to the default
+      # toolchain.
       - name: Install Rust RISC-V target
         run: |
           rustup toolchain install nightly
@@ -40,8 +50,8 @@ jobs:
 
       - name: Verify toolchain
         run: |
-          riscv64-unknown-elf-gcc --version
-          qemu-system-riscv64 --version
+          riscv64-unknown-elf-gcc --version   # should print GCC version
+          qemu-system-riscv64 --version       # should print QEMU version 5.1 or higher
 
       - name: make grade
         run: make grade

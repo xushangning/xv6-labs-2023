@@ -1,41 +1,6 @@
 ## Build Environment Setup
 
-### 1. RISC-V bare-metal toolchain and QEMU
-
-Install the bare-metal GCC toolchain (not `gcc-riscv64-linux-gnu` stated on the [course website](https://pdos.csail.mit.edu/6.828/2023/tools.html), which targets Linux ABI and causes linker errors with stack-protector symbols in a freestanding kernel):
-
-```
-apt-get install -y gcc-riscv64-unknown-elf
-```
-
-Install QEMU (run `apt-get update` first to avoid 404 errors from stale mirror metadata):
-
-```
-apt-get update && apt-get install -y qemu-system-misc
-```
-
-Verify:
-
-```
-riscv64-unknown-elf-gcc --version   # should print GCC version
-qemu-system-riscv64 --version       # should print QEMU version 5.1 or higher
-```
-
-### 2. Rust toolchain
-
-Install Rust via rustup if not already present, then [add RISC-V bare-metal target support](https://doc.rust-lang.org/rustc/platform-support/riscv64gc-unknown-linux-gnu.html):
-
-```
-rustup target add riscv64gc-unknown-none-elf
-```
-
-### 3. Verify the build
-
-Run the tests with
-
-```
-make grade
-```
+See [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the up-to-date, runnable steps to set up the toolchain and verify the build with `make grade`. That file is the source of truth for environment setup.
 
 ## Development Guidelines
 
