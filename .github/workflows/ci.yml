@@ -2,13 +2,25 @@ name: make grade
 
 on:
   push:
-    paths-ignore:
-      - 'README.md'
-      - 'AGENTS.md'
+    paths:
+      - 'kernel/**'
+      - 'user/**'
+      - 'mkfs/**'
+      - 'conf/**'
+      - 'Makefile'
+      - 'gradelib.py'
+      - 'grade-lab-*'
+      - '.github/workflows/ci.yml'
   pull_request:
-    paths-ignore:
-      - 'README.md'
-      - 'AGENTS.md'
+    paths:
+      - 'kernel/**'
+      - 'user/**'
+      - 'mkfs/**'
+      - 'conf/**'
+      - 'Makefile'
+      - 'gradelib.py'
+      - 'grade-lab-*'
+      - '.github/workflows/ci.yml'
 
 jobs:
   grade:
