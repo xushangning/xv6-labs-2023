@@ -1,4 +1,4 @@
-name: GRADE
+name: Grade
 
 on:
   push:
@@ -50,5 +50,5 @@ jobs:
           rustup toolchain install nightly
           rustup target add --toolchain nightly riscv64gc-unknown-none-elf
 
-      - name: GRADE
+      - name: Grade
         run: make grade
